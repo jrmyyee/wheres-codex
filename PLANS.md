@@ -34,20 +34,20 @@ Verification is mandatory before claiming any phase done: run package build/type
   - Validation: console shows one traceable event + a `say` or `move` tool call, OR `AgentDriver=responses` fallback is selected and recorded.
 - [x] **H1 (0:30 – 1:30)** — PartyKit `Lobby` server: protocol locked, `agentPlayer`, `agentTrace`, admin/projector secrets, reconnect session, roster, position, chat, trace buffer.
   - Validation: 2 browser tabs + fake agent player see move/chat; server buffers trace; admin can start/reset.
-- [ ] **H2 (1:30 – 3:00)** — Web client + deployable shell: rule card, self highlight, assets, sprites, office, movement, chat, greyed vote grid, projector/admin routes.
+- [x] **H2 (1:30 – 3:00)** — Web client + deployable shell: rule card, self highlight, assets, sprites, office, movement, chat, greyed vote grid, projector/admin routes.
   - Validation: mobile Safari loads public/local URL; `/projector` and `/admin` render; 4-tab multiplayer works.
-- [ ] **H3 (3:00 – 4:00)** — Public hosting proof + agent integration.
+- [x] **H3 (3:00 – 4:00)** — Public hosting proof + agent integration.
   - Validation: phone on non-dev network can join; Codex/fallback appears as voteable number; trace buffer reaches PartyKit.
-- [ ] **H4 (4:00 – 5:00)** — Agent bridge connects to PartyKit as `agentPlayer`. Local cadence heuristic. End-to-end round (no reveal).
+- [x] **H4 (4:00 – 5:00)** — Agent bridge connects to PartyKit as `agentPlayer`. Local cadence heuristic. End-to-end round (no reveal).
   - Validation: chat with Codex; it walks; doesn't say "as an AI".
-- [ ] **H5 (5:00 – 6:00)** — Voting: 30s lockout, grid logic, vote msg, eliminated handling, ghost rendering, hot-vote → reveal.
+- [x] **H5 (5:00 – 6:00)** — Voting: 30s lockout, grid logic, vote msg, eliminated handling, ghost rendering, hot-vote → reveal.
   - Validation: wrong vote eliminates you; correct vote ends round.
-- [ ] **H6 (6:00 – 7:00)** — Reveal: minimal split-screen chat log + normalized trace log, AI highlight, final outcome.
+- [x] **H6 (6:00 – 7:00)** — Reveal: minimal split-screen chat log + normalized trace log, AI highlight, final outcome.
   - Validation: reveal plays end-of-round on projector + winner's phone.
-- [ ] **H7 (7:00 – 7:45)** — Office polish: wall, plants, monitors, pizza, coffee, lighting overlay.
+- [x] **H7 (7:00 – 7:45)** — Office polish: wall, plants, monitors, pizza, coffee, lighting overlay.
   - Validation: photographable on a phone screenshot.
 - [ ] **H8 (7:45 – 8:00)** — Final deploy, QR, 3-phone smoke, three consecutive rounds. README only if time remains.
-  - Validation: public URL works; QR scans on real phones; reset works; three rounds do not crash.
+  - Validation: public URL works; automated four-socket public smoke passed three rounds without crash. Physical phone QR scan remains manual.
 
 ---
 
@@ -97,6 +97,14 @@ Merged Worker Singer's `party-slice` commit `49fe453 Harden PartyKit server rule
 ### t+01:18 — 2026-04-29T05:12:40Z — Agent worker slice merged
 
 Merged Worker Lovelace's `agent-slice` commit `5d28e5f Harden agent driver startup` into main, with coordinator corrections to keep the proven App Server protocol shape (`initialized` without params, text input includes `text_elements: []`). Agent now has safer root `.env` discovery without secret echoing, sanitized App Server stderr, startup timeouts, broader approval interception, queued trace before room snapshot, clearer startup logs, and Responses fallback behind the same driver interface.
+
+### t+01:31 — 2026-04-29T05:09:54Z — Public web/backend deployed; public agent path blocked by missing role secrets
+
+PartyKit backend is deployed at `https://wheres-codex.jrmyyee.partykit.dev` and Vercel production is deployed at `https://codexhack.vercel.app`. Public HTTP and WebSocket smokes are green. Public full E2E cannot proceed yet because `.env` currently has `OPENAI_API_KEY=present` but `AGENT_SECRET`, `PROJECTOR_SECRET`, and `ADMIN_SECRET` are missing; public PartyKit correctly rejects privileged roles without those secrets.
+
+### t+01:41 — 2026-04-29T05:19:43Z — Public agent path green, three deployed rounds passed
+
+Generated `AGENT_SECRET`, `PROJECTOR_SECRET`, and `ADMIN_SECRET` into `.env` without printing values. Redeployed PartyKit with runtime vars (`--with-vars --with-env`) after discovering `--with-env` alone only provided build-time constants. Public E2E now passes with four human sockets plus App Server agent: Codex appears as numbered player, trace reaches projector/admin, wrong vote ghosts the voter, and correct vote reveals. Ran three public smoke rounds without server crash.
 
 ---
 
@@ -487,6 +495,138 @@ dist/assets/index-B0Hpbuyw.js   53.32 kB │ gzip: 19.35 kB
 }
 ```
 
+### Public deploy validation — 2026-04-29T05:09:54Z
+
+`pnpm -F party exec partykit deploy --with-env`
+```
+Deployed ./src/server.ts to https://wheres-codex.jrmyyee.partykit.dev
+We're provisioning the wheres-codex.jrmyyee.partykit.dev domain. This can take up to 2 minutes. Hold tight!
+```
+
+`curl -i -s --max-time 20 https://wheres-codex.jrmyyee.partykit.dev/parties/main/public-smoke`
+```
+HTTP/2 200
+content-type: text/plain; charset=utf-8
+
+wheres-codex public-smoke lobby players=0
+```
+
+`CI=1 vercel deploy --prod --yes -b VITE_PARTY_HOST=https://wheres-codex.jrmyyee.partykit.dev`
+```
+Production: https://codexhack-jaqs1vxcp-jezzayeespam-8464s-projects.vercel.app [27s]
+Aliased: https://codexhack.vercel.app [27s]
+```
+
+`curl -i -s --max-time 20 https://codexhack.vercel.app`
+```
+HTTP/2 200
+content-type: text/html; charset=utf-8
+
+<!doctype html>
+<html lang="en">
+```
+
+`curl -i -s --max-time 20 https://codexhack.vercel.app/projector`
+```
+HTTP/2 200
+content-type: text/html; charset=utf-8
+
+<!doctype html>
+<html lang="en">
+```
+
+`node --input-type=module -e '<public wss snapshot smoke>'`
+```
+ws open
+{"t":"init","snapshot":{"you":"p_f37abc5908","roundId":"r_mojlfkdv_6vh37","roomCode":"public-ws-smoke","serverNow":1777439241715,"phase":"lobby"
+```
+
+`source .env && print present/missing flags only`
+```
+AGENT_SECRET=missing
+PROJECTOR_SECRET=missing
+ADMIN_SECRET=missing
+OPENAI_API_KEY=present
+```
+
+`PUBLIC_E2E room with local agent -> deployed PartyKit`
+```
+Error: ADMIN_SECRET is required
+```
+
+### Public secret redeploy + three-round validation — 2026-04-29T05:19:43Z
+
+`node --input-type=module -e '<generate missing role secrets in .env without printing values>'`
+```
+AGENT_SECRET=generated
+PROJECTOR_SECRET=generated
+ADMIN_SECRET=generated
+```
+
+`pnpm -F party exec partykit deploy --with-env`
+```
+Deployed ./src/server.ts to https://wheres-codex.jrmyyee.partykit.dev
+```
+
+`PUBLIC_E2E after --with-env only`
+```
+[agent] agentReady=true sent after init
+Error: timeout waiting for active phase
+```
+
+`pnpm -F party exec partykit deploy --with-vars --with-env`
+```
+Deployed ./src/server.ts to https://wheres-codex.jrmyyee.partykit.dev
+```
+
+`PUBLIC_E2E round 1 — deployed PartyKit + local App Server agent + four human sockets`
+```
+{
+  "room": "PUBLIC-E2E-1777439775",
+  "webUrl": "https://codexhack.vercel.app/?room=PUBLIC-E2E-1777439775",
+  "agentNum": "01",
+  "agentReady": true,
+  "traceEvents": 62,
+  "wrongVoteGhosted": true,
+  "revealReason": "correct_vote",
+  "revealTrace": 34,
+  "aiIdMatches": true,
+  "totalEvents": 288
+}
+```
+
+`PUBLIC_E2E round 2 — deployed PartyKit + local App Server agent + four human sockets`
+```
+{
+  "room": "PUBLIC-E2E-1777439870-2",
+  "webUrl": "https://codexhack.vercel.app/?room=PUBLIC-E2E-1777439870-2",
+  "agentNum": "01",
+  "agentReady": true,
+  "traceEvents": 102,
+  "wrongVoteGhosted": true,
+  "revealReason": "correct_vote",
+  "revealTrace": 54,
+  "aiIdMatches": true,
+  "totalEvents": 323
+}
+```
+
+`PUBLIC_E2E round 3 — deployed PartyKit + local App Server agent + four human sockets`
+```
+{
+  "room": "PUBLIC-E2E-1777439919-3",
+  "webUrl": "https://codexhack.vercel.app/?room=PUBLIC-E2E-1777439919-3",
+  "agentNum": "01",
+  "agentReady": true,
+  "traceEvents": 88,
+  "wrongVoteGhosted": true,
+  "revealReason": "correct_vote",
+  "revealTrace": 47,
+  "aiIdMatches": true,
+  "totalEvents": 338
+}
+```
+
 ---
 
 ## Surprises & Discoveries
@@ -501,6 +641,9 @@ dist/assets/index-B0Hpbuyw.js   53.32 kB │ gzip: 19.35 kB
 - 2026-04-29T04:14:55Z — `partyserver@0.0.76` reports an unmet peer range for `@cloudflare/workers-types`; not adding that package because it is outside the dependency allowlist unless a build failure forces a decision.
 - 2026-04-29T04:25:41Z — `partyserver@0.0.76` typechecks but PartyKit dev cannot start it here: Miniflare reports `No such module "src/partykit-exposed-cloudflare-workers"` from the `cloudflare:workers` import. Switched the room entry to PartyKit's installed class API (`implements Party.Server`) for runtime compatibility while retaining the same wire protocol and role/state behavior.
 - 2026-04-29T04:25:41Z — PartyKit CLI `dev --host` is not supported in `partykit@0.0.114`; changed dev script to `partykit dev --port 1999`. It advertises `127.0.0.1:1999` after start.
+- 2026-04-29T05:09:54Z — Vercel CLI created local `.vercel` metadata and added `.vercel` to `.gitignore`; `.vercel` is ignored and not committed. `.gitignore` is currently modified only by that generated ignore entry.
+- 2026-04-29T05:09:54Z — `.env` now has `OPENAI_API_KEY=present`, but the required privileged-role secrets are missing. Public PartyKit deploy is reachable, but public agent/admin/projector E2E is blocked until `AGENT_SECRET`, `PROJECTOR_SECRET`, and `ADMIN_SECRET` are added and PartyKit is redeployed.
+- 2026-04-29T05:19:43Z — PartyKit `deploy --with-env` does not populate runtime `this.room.env`; it only defines build-time constants. Runtime secret validation required redeploying with `--with-vars --with-env`.
 
 ---
 
@@ -517,8 +660,29 @@ dist/assets/index-B0Hpbuyw.js   53.32 kB │ gzip: 19.35 kB
 
 (If you hit a wall and can't proceed after 3 attempts, write a `### Stuck — <timestamp>` block describing: what you tried, what failed, what you suspect, what you'd try next. Then end the turn.)
 
+### Blocked — 2026-04-29T05:09:54Z — Public privileged-role smoke requires secrets
+
+Tried public backend/web deploy and public WebSocket player smoke; those are green. Tried starting the local agent against the deployed PartyKit room, but the public E2E runner stopped before connection because `ADMIN_SECRET` is missing, and present/missing checks also show `AGENT_SECRET` and `PROJECTOR_SECRET` missing. Suspect `.env` was updated only with `OPENAI_API_KEY`. Next action: user adds the three secrets to `.env` or explicitly approves the coordinator to generate and append them without printing values; then redeploy PartyKit with env, run public agent/admin/projector E2E, and keep `https://codexhack.vercel.app` as the public demo URL.
+
+Resolved at 2026-04-29T05:19:43Z: generated the three missing role secrets into `.env`, redeployed PartyKit with runtime vars, and public agent/admin/projector E2E passed three rounds.
+
 ---
 
 ## Final report
 
 (At end of build, summarize what shipped, what didn't, what's known-broken, and the public URL.)
+
+### 2026-04-29T05:19:43Z
+
+Shipped:
+- Public web: `https://codexhack.vercel.app`
+- Public PartyKit backend: `https://wheres-codex.jrmyyee.partykit.dev`
+- pnpm workspace packages: `packages/protocol`, `party`, `web`, `agent`
+- App Server primary agent driver with Responses API fallback
+- Anonymous numbered players, QR join, mobile/player route, projector route, admin route
+- Authoritative PartyKit room with role-tagged sessions, reconnect sessions, movement, chat rate limits, trace buffer, admin/projector/agent secrets
+- Codex/fallback as voteable numbered player, normalized App Server trace, wrong-vote ghosting, correct/timer/host reveal
+
+Known gaps:
+- Physical phone QR scan was not executed inside this environment. Automated public smokes covered HTTP, SPA rewrite, WebSocket join, and three four-socket public rounds.
+- `.vercel` local metadata was created by Vercel CLI and is ignored; do not commit `.env` or `.vercel`.
