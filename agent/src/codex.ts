@@ -2,7 +2,8 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { mkdirSync } from "node:fs";
 import readline from "node:readline";
-import { trace } from "./trace";
+import type { AgentDriver, AgentDriverEvents } from "./driver";
+import { normalizeTraceText, trace } from "./trace";
 import type { ToolCall, ToolDef } from "./tools";
 import type { TraceEntryInput } from "@wheres-codex/protocol";
 
@@ -13,13 +14,6 @@ type Pending = {
   timer: ReturnType<typeof setTimeout>;
 };
 
-type CodexEvents = {
-  trace: [TraceEntryInput];
-  toolCall: [ToolCall];
-  completed: [];
-  model: [string];
-};
-
 const optOutNotificationMethods = [
   "turn/diff/updated",
   "item/commandExecution/outputDelta",
@@ -28,9 +22,15 @@ const optOutNotificationMethods = [
   "thread/tokenUsage/updated",
 ];
 
-export class Codex extends EventEmitter<CodexEvents> {
+const DEFAULT_START_TIMEOUT_MS = 45_000;
+
+export class Codex extends EventEmitter<AgentDriverEvents> implements AgentDriver {
+  readonly label = "appserver";
+
   private proc: ChildProcess | null = null;
   private rl: readline.Interface | null = null;
+  private stderr: readline.Interface | null = null;
+  private stderrTail: string[] = [];
   private nextId = 1;
   private threadId: string | null = null;
   private pending = new Map<number, Pending>();
@@ -46,41 +46,57 @@ export class Codex extends EventEmitter<CodexEvents> {
   async start(): Promise<string> {
     mkdirSync("/tmp/wheres-codex-scratch", { recursive: true });
     const proc = spawn("codex", ["app-server"], {
-      stdio: ["pipe", "pipe", "inherit"],
+      stdio: ["pipe", "pipe", "pipe"],
       env: process.env,
     });
     if (!proc.stdout || !proc.stdin) throw new Error("failed to open App Server stdio");
     this.proc = proc;
     this.rl = readline.createInterface({ input: proc.stdout });
     this.rl.on("line", (line) => this.onLine(line));
-
-    await this.send("initialize", {
-      clientInfo: { name: "wheres-codex", title: "where's codex", version: "0.1.0" },
-      capabilities: { experimentalApi: true, optOutNotificationMethods },
+    if (proc.stderr) {
+      this.stderr = readline.createInterface({ input: proc.stderr });
+      this.stderr.on("line", (line) => this.onStderr(line));
+    }
+    proc.once("error", (error) => this.failPending(`app-server process error: ${error.message}`));
+    proc.once("exit", (code, signal) => {
+      if (this.pending.size > 0) this.failPending(`app-server exited before responding: code ${code ?? "null"} signal ${signal ?? "null"}`);
     });
-    this.notify("initialized");
 
-    const modelList = (await this.send("model/list", { limit: 50, includeHidden: true })) as { data?: Array<{ id: string; model: string; isDefault?: boolean; displayName?: string }> };
-    this.selectedModel = this.pickModel(modelList.data ?? []);
-    this.emit("model", this.selectedModel);
+    const startupTimeoutMs = appServerStartTimeoutMs();
+    try {
+      await this.send("initialize", {
+        clientInfo: { name: "wheres-codex", title: "where's codex", version: "0.1.0" },
+        capabilities: { experimentalApi: true, optOutNotificationMethods },
+      }, startupTimeoutMs);
+      this.notify("initialized");
 
-    const res = (await this.send(
-      "thread/start",
-      {
-        model: this.selectedModel,
-        cwd: "/tmp/wheres-codex-scratch",
-        approvalPolicy: "never",
-        sandbox: "read-only",
-        ephemeral: true,
-        dynamicTools: this.dynamicTools,
-        experimentalRawEvents: false,
-        persistExtendedHistory: false,
-      },
-      45_000,
-    )) as { thread?: { id?: string } };
-    this.threadId = res.thread?.id ?? null;
-    if (!this.threadId) throw new Error("App Server did not return thread id");
-    return this.selectedModel;
+      const modelList = (await this.send("model/list", { limit: 50, includeHidden: true }, startupTimeoutMs)) as { data?: Array<{ id: string; model: string; isDefault?: boolean; displayName?: string }> };
+      this.selectedModel = this.pickModel(modelList.data ?? []);
+      this.emit("model", this.selectedModel);
+
+      const res = (await this.send(
+        "thread/start",
+        {
+          model: this.selectedModel,
+          cwd: "/tmp/wheres-codex-scratch",
+          approvalPolicy: "never",
+          sandbox: "read-only",
+          ephemeral: true,
+          dynamicTools: this.dynamicTools,
+          experimentalRawEvents: false,
+          persistExtendedHistory: false,
+        },
+        startupTimeoutMs,
+      )) as { thread?: { id?: string } };
+      this.threadId = res.thread?.id ?? null;
+      if (!this.threadId) throw new Error("App Server did not return thread id");
+      this.emitTrace(trace("meta", "bridge", `appserver ready. model ${this.selectedModel}`));
+      return this.selectedModel;
+    } catch (error) {
+      const suffix = this.stderrTail.length ? ` stderr: ${this.stderrTail.join(" | ")}` : "";
+      this.shutdown();
+      throw new Error(`${errorMessage(error)}${suffix}`);
+    }
   }
 
   async turn(input: string): Promise<void> {
@@ -110,19 +126,27 @@ export class Codex extends EventEmitter<CodexEvents> {
     }
     this.pending.clear();
     this.rl?.close();
+    this.stderr?.close();
     this.proc?.kill();
   }
 
   private send(method: string, params?: object, timeoutMs = 30_000): Promise<unknown> {
     const id = this.nextId++;
     if (!this.proc?.stdin) throw new Error("App Server stdin is closed");
-    this.proc.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`app-server timeout: ${method}`));
       }, timeoutMs);
       this.pending.set(id, { method, resolve, reject, timer });
+      this.proc?.stdin?.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`, (error) => {
+        if (!error) return;
+        const pending = this.pending.get(id);
+        if (!pending) return;
+        this.pending.delete(id);
+        clearTimeout(pending.timer);
+        reject(error);
+      });
     });
   }
 
@@ -132,6 +156,14 @@ export class Codex extends EventEmitter<CodexEvents> {
 
   private respond(id: number | string, result: object): void {
     this.proc?.stdin?.write(`${JSON.stringify({ jsonrpc: "2.0", id, result })}\n`);
+  }
+
+  private onStderr(line: string): void {
+    const text = normalizeTraceText(line);
+    if (!text) return;
+    this.stderrTail.push(text);
+    this.stderrTail = this.stderrTail.slice(-6);
+    console.error(`[agent] appserver stderr: ${text}`);
   }
 
   private onLine(line: string): void {
@@ -161,25 +193,20 @@ export class Codex extends EventEmitter<CodexEvents> {
   }
 
   private handleServerRequest(msg: { id: number | string; method: string; params?: any }): void {
-    if (
-      msg.method === "item/commandExecution/requestApproval" ||
-      msg.method === "item/fileChange/requestApproval" ||
-      msg.method === "item/permissions/requestApproval" ||
-      msg.method === "mcpServer/elicitation/request" ||
-      msg.method === "applyPatchApproval" ||
-      msg.method === "execCommandApproval"
-    ) {
+    if (isApprovalRequest(msg.method)) {
       this.respond(msg.id, { decision: "decline" });
+      this.emitTrace(trace("meta", "bridge", `declined approval request: ${msg.method}`));
       return;
     }
 
     if (msg.method === "item/tool/call") {
-      const tool = String(msg.params?.tool ?? "");
+      const tool = String(msg.params?.tool ?? msg.params?.name ?? "");
       if (tool === "say" || tool === "move" || tool === "idle") {
-        this.emit("trace", trace("tool", "bridge", `tool call: ${tool}`));
-        this.emit("toolCall", { requestId: msg.id, tool, arguments: msg.params?.arguments ?? {} });
+        this.emitTrace(trace("tool", "bridge", `tool call: ${tool}`));
+        this.emit("toolCall", { requestId: msg.id, tool, arguments: parseToolArguments(msg.params?.arguments) });
         return;
       }
+      this.emitTrace(trace("meta", "bridge", `declined unsupported tool: ${tool || "unknown"}`));
     }
 
     this.respond(msg.id, {
@@ -190,26 +217,38 @@ export class Codex extends EventEmitter<CodexEvents> {
 
   private handleNotification(method: string, params: any): void {
     if (method === "item/reasoning/textDelta") {
-      this.emit("trace", trace("reasoning", "appserver_raw", String(params?.delta ?? "")));
+      this.emitTrace(trace("reasoning", "appserver_raw", String(params?.delta ?? "")));
     }
     if (method === "item/reasoning/summaryTextDelta") {
-      this.emit("trace", trace("reasoning", "appserver_summary", String(params?.delta ?? "")));
+      this.emitTrace(trace("reasoning", "appserver_summary", String(params?.delta ?? "")));
     }
     if (method === "item/agentMessage/delta") {
-      this.emit("trace", trace("agentMessage", "appserver_raw", String(params?.delta ?? "")));
+      this.emitTrace(trace("agentMessage", "appserver_raw", String(params?.delta ?? "")));
     }
     if (method === "item/started") {
       const type = params?.item?.type;
       if (type === "reasoning" || type === "dynamicToolCall" || type === "agentMessage") {
-        this.emit("trace", trace("meta", "bridge", `appserver item: ${type}`));
+        this.emitTrace(trace("meta", "bridge", `appserver item: ${type}`));
       }
       if (type === "commandExecution" || type === "fileChange" || type === "webSearch") {
-        this.emit("trace", trace("meta", "bridge", `blocked built-in tool attempt: ${type}`));
+        this.emitTrace(trace("meta", "bridge", `blocked built-in tool attempt: ${type}`));
       }
     }
     if (method === "turn/completed") {
-      this.emit("trace", trace("meta", "bridge", "turn completed"));
+      this.emitTrace(trace("meta", "bridge", "turn completed"));
       this.emit("completed");
+    }
+  }
+
+  private emitTrace(entry: TraceEntryInput): void {
+    if (entry.text) this.emit("trace", entry);
+  }
+
+  private failPending(message: string): void {
+    for (const [id, pending] of this.pending) {
+      this.pending.delete(id);
+      clearTimeout(pending.timer);
+      pending.reject(new Error(`${pending.method}: ${message}`));
     }
   }
 
@@ -224,4 +263,37 @@ export class Codex extends EventEmitter<CodexEvents> {
     const fallback = models.find((model) => model.isDefault) ?? models[0];
     return fallback?.model || fallback?.id || "gpt-5.3-codex";
   }
+}
+
+function isApprovalRequest(method: string): boolean {
+  return (
+    method.endsWith("/requestApproval") ||
+    method === "mcpServer/elicitation/request" ||
+    method === "applyPatchApproval" ||
+    method === "execCommandApproval" ||
+    method.toLowerCase().includes("approval")
+  );
+}
+
+function parseToolArguments(value: unknown): ToolCall["arguments"] {
+  if (!value) return {};
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      if (parsed && typeof parsed === "object") return parsed;
+    } catch {
+      return {};
+    }
+  }
+  if (typeof value === "object") return value as ToolCall["arguments"];
+  return {};
+}
+
+function appServerStartTimeoutMs(): number {
+  const raw = Number(process.env.CODEX_APP_SERVER_START_TIMEOUT_MS);
+  return Number.isFinite(raw) && raw >= 1_000 ? raw : DEFAULT_START_TIMEOUT_MS;
+}
+
+function errorMessage(error: unknown): string {
+  return String(error instanceof Error ? error.message : error).slice(0, 220);
 }
