@@ -35,6 +35,7 @@ let snapshot: Snapshot | null = null;
 let selfId: string | null = null;
 let busy = false;
 let lastTurnAt = 0;
+let lastQuickChatAt = 0;
 let activeLoop: ReturnType<typeof setInterval> | null = null;
 let keepAliveLoop: ReturnType<typeof setInterval> | null = null;
 let selectedModel = "pending";
@@ -156,6 +157,7 @@ function applyServerMsg(msg: ServerMsg): void {
   }
   if (msg.t === "chat") {
     snapshot = { ...snapshot, chatLog: [...snapshot.chatLog, { id: msg.id, text: msg.text, ts: msg.ts }].slice(-120) };
+    maybeQuickReply(msg.id, msg.text);
   }
   if (msg.t === "phase") {
     snapshot = {
@@ -247,14 +249,7 @@ async function handleToolCall(call: ToolCall): Promise<void> {
 async function walkTo(target: { x: number; y: number }): Promise<void> {
   const self = selfPlayer();
   if (!self) return;
-  const distancePx = Math.hypot(target.x - self.x, target.y - self.y);
-  const steps = Math.max(3, Math.min(8, Math.ceil(distancePx / 72)));
-  for (let i = 1; i <= steps; i += 1) {
-    const x = Math.round(self.x + ((target.x - self.x) * i) / steps);
-    const y = Math.round(self.y + ((target.y - self.y) * i) / steps);
-    send({ t: "move", x, y, facing: facingTo(self, x, y) });
-    await sleep(70);
-  }
+  send({ t: "move", x: target.x, y: target.y, facing: facingTo(self, target.x, target.y) });
 }
 
 function buildTurnInput(reason: string): string {
@@ -293,6 +288,32 @@ function movementSummary(self: Player | null): string {
     .slice(0, 4)
     .join(", ");
   return `moving now ${moving || "none"}; nearby ${nearby || "none"}`;
+}
+
+function maybeQuickReply(senderId: string, text: string): void {
+  const self = selfPlayer();
+  if (!self || senderId === self.id || self.isGhost || snapshot?.phase !== "active") return;
+  const now = Date.now();
+  if (now - lastQuickChatAt < 2_200) return;
+  const reply = quickReply(text, self.num);
+  if (!reply) return;
+  lastQuickChatAt = now;
+  lastTurnAt = now;
+  setTimeout(() => send({ t: "chat", text: reply }), Math.round(300 + Math.random() * 700));
+}
+
+function quickReply(text: string, num: string): string | null {
+  const clean = text.toLowerCase().replace(/[^a-z0-9?\s]/g, "").trim();
+  if (!clean) return null;
+  if (/^(lol|lmao|haha|hehe|lmfao)$/.test(clean)) return Math.random() < 0.5 ? "lol" : "lmao";
+  if (/^(hi|hey|hello|yo)$/.test(clean)) return Math.random() < 0.5 ? "hey" : "yo";
+  if (/^(ok|k|yeah|yea|yep|sure)$/.test(clean)) return Math.random() < 0.5 ? "yeah" : "ok";
+  if (/^(nah|no|nope)$/.test(clean)) return "nah";
+  if (clean.includes(num.replace(/^0/, "")) || clean.includes(num) || /codex|bot|ai|sus/.test(clean)) {
+    return ["nah", "lol no", "wait what", "bruh", "idk"][Math.floor(Math.random() * 5)] ?? "nah";
+  }
+  if (clean.length <= 12 && Math.random() < 0.25) return ["lol", "same", "fair", "idk"][Math.floor(Math.random() * 4)] ?? "lol";
+  return null;
 }
 
 function walkTarget(self: Player, reason: string): { x: number; y: number } {

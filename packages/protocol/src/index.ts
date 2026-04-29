@@ -15,9 +15,9 @@ export const MOVE_MIN_INTERVAL_MS = 80;
 export const TRACE_RATE_LIMIT_PER_SEC = 10;
 export const ROLLIN_MS = 2_500;
 export const ACTIVE_MS = 210_000;
-export const ACTIVE_DEMO_MS = 75_000;
+export const ACTIVE_DEMO_MS = 60_000;
 export const VOTE_LOCKOUT_MS = 8_000;
-export const VOTE_LOCKOUT_DEMO_MS = 2_000;
+export const VOTE_LOCKOUT_DEMO_MS = 25_000;
 export const REVEAL_MS = 20_000;
 export const OUTRO_MS = 5_000;
 

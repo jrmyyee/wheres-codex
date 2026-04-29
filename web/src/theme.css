@@ -30,7 +30,6 @@ body {
     linear-gradient(90deg, rgba(255, 255, 255, 0.08) 1px, transparent 1px) 0 0 / 48px 48px,
     linear-gradient(rgba(16, 33, 41, 0.14) 1px, transparent 1px) 0 0 / 48px 48px,
     var(--floor-warm);
-  filter: saturate(1.05);
   overflow: hidden;
   touch-action: manipulation;
 }
@@ -535,15 +534,6 @@ button:focus-visible,
   box-shadow: 4px 4px 0 var(--line), 0 0 0 1px hsl(var(--hue), 70%, 55%);
 }
 
-.chat-line {
-  animation: chatLineIn 220ms ease both;
-}
-
-@keyframes chatLineIn {
-  from { opacity: 0; transform: translateY(4px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-
 .chat-line.ai {
   background: linear-gradient(90deg, rgba(244, 197, 66, 0.08), transparent 70%);
   padding: 2px 6px;
@@ -552,15 +542,7 @@ button:focus-visible,
 
 .trace-panel,
 .reveal-trace {
-  background-image:
-    repeating-linear-gradient(
-      0deg,
-      rgba(95, 232, 212, 0.04) 0,
-      rgba(95, 232, 212, 0.04) 1px,
-      transparent 1px,
-      transparent 3px
-    );
-  text-shadow: 0 0 2px rgba(95, 232, 212, 0.35);
+  text-shadow: none;
 }
 
 .identity {
@@ -588,8 +570,8 @@ button:focus-visible,
 }
 
 @keyframes revealTitleIn {
-  from { opacity: 0; letter-spacing: 0.6em; filter: blur(6px); }
-  to   { opacity: 1; letter-spacing: 0; filter: blur(0); }
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 
 .reveal {

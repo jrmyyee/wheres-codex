@@ -27,6 +27,7 @@ const room = (params.get("room") || "SGN-LOCAL").slice(0, 32);
 const secret = params.get("secret") || "";
 const sessionId = mode === "player" ? getSessionId() : undefined;
 const bubbles = new Map<string, { text: string; until: number }>();
+const playerNodes = new Map<string, HTMLElement>();
 
 let socket: GameSocket | null = null;
 let snapshot: Snapshot | null = null;
@@ -72,6 +73,19 @@ function connect(): void {
     },
     onMessage(msg) {
       applyServerMsg(msg);
+      if (msg.t === "pos") {
+        renderPlayers();
+        return;
+      }
+      if (msg.t === "chat") {
+        renderPlayers();
+        renderChat();
+        return;
+      }
+      if (msg.t === "trace") {
+        renderTrace();
+        return;
+      }
       render();
     },
   });
@@ -502,26 +516,37 @@ function renderIdentity(identity: Element): void {
 function renderPlayers(): void {
   const layer = document.querySelector(".players-layer");
   if (!layer || !snapshot) return;
-  layer.textContent = "";
   const now = Date.now();
+  const liveIds = new Set<string>();
   pruneBubbles(now);
   for (const player of snapshot.players) {
-    const node = div(`player ${playerClass(player)}`);
+    liveIds.add(player.id);
+    let node = playerNodes.get(player.id);
+    if (!node) {
+      node = div("player");
+      node.append(div("num"), div("body"));
+      playerNodes.set(player.id, node);
+    }
+    node.className = `player ${playerClass(player)}`;
     node.style.setProperty("--x", `${player.x}px`);
     node.style.setProperty("--y", `${player.y}px`);
     node.style.setProperty("--hue", String(player.hue));
     node.style.setProperty("--sat", String(player.sat));
-    const num = div("num");
-    num.textContent = player.num;
-    const body = div("body");
-    node.append(num, body);
+    const num = node.querySelector(".num");
+    if (num) num.textContent = player.num;
+    node.querySelector(".bubble")?.remove();
     const bubble = bubbles.get(player.id);
     if (bubble && bubble.until > now) {
       const bubbleNode = div("bubble");
       bubbleNode.textContent = bubble.text;
       node.append(bubbleNode);
     }
-    layer.append(node);
+    if (node.parentElement !== layer) layer.append(node);
+  }
+  for (const [id, node] of playerNodes) {
+    if (liveIds.has(id)) continue;
+    node.remove();
+    playerNodes.delete(id);
   }
 }
 
@@ -603,8 +628,17 @@ function renderReveal(): void {
   const overlay = document.querySelector<HTMLElement>(".reveal");
   if (!overlay || !snapshot) return;
   const show = snapshot.phase === "reveal" || Boolean(revealPayload);
+  const revealKey = show ? `${revealPayload?.aiId ?? "pending"}:${revealPayload?.reason ?? snapshot.phase}:${revealPayload?.voterId ?? ""}` : "";
   overlay.classList.toggle("hidden", !show);
-  if (!show) return;
+  if (!show) {
+    overlay.dataset.revealKey = "";
+    overlay.querySelector(".reveal-chat")?.replaceChildren();
+    const tracePane = overlay.querySelector(".reveal-trace");
+    if (tracePane) tracePane.textContent = "";
+    return;
+  }
+  if (overlay.dataset.revealKey === revealKey) return;
+  overlay.dataset.revealKey = revealKey;
   const chatPane = overlay.querySelector(".reveal-chat");
   const tracePane = overlay.querySelector(".reveal-trace");
   if (!chatPane || !tracePane) return;

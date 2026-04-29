@@ -51,7 +51,6 @@
 
 .player.ghost {
   opacity: 0.3;
-  filter: grayscale(1);
 }
 
 .num {

@@ -899,7 +899,7 @@ export default class Lobby implements Party.Server {
   }
 
   private roomEnv(): Env {
-    return this.room.env as Env;
+    return (this.room.env ?? {}) as Env;
   }
 
   private broadcastMsg(msg: ServerMsg): void {
