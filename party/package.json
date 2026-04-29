@@ -1,0 +1,21 @@
+{
+  "name": "party",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "partykit dev --port 1999",
+    "deploy": "partykit deploy",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@wheres-codex/protocol": "workspace:*",
+    "partykit": "^0.0.114",
+    "partyserver": "^0.0.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  }
+}

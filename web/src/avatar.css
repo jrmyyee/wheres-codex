@@ -1,0 +1,101 @@
+.player {
+  position: absolute;
+  width: 48px;
+  height: 60px;
+  transform: translate3d(var(--x), var(--y), 0);
+  transition: transform 120ms linear;
+  will-change: transform;
+  z-index: 5;
+}
+
+.player.self::after {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 14px;
+  width: 38px;
+  height: 34px;
+  border: 3px solid var(--accent);
+  box-shadow: 0 0 12px var(--accent);
+  animation: pulse 1.2s infinite;
+}
+
+.body {
+  position: absolute;
+  left: 12px;
+  top: 22px;
+  width: 24px;
+  height: 24px;
+  background: hsl(var(--hue), 58%, 48%);
+  filter: saturate(var(--sat));
+  box-shadow:
+    0 -12px 0 #d9a066,
+    -8px 8px 0 #1d1712,
+    8px 8px 0 #1d1712,
+    -8px 22px 0 #2b3640,
+    8px 22px 0 #2b3640;
+  image-rendering: pixelated;
+}
+
+.player.moving .body {
+  animation: bob 0.28s steps(2) infinite;
+}
+
+.player.left .body {
+  transform: scaleX(-1);
+}
+
+.player.ghost {
+  opacity: 0.3;
+  filter: grayscale(1);
+}
+
+.num {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  transform: translateX(-50%);
+  padding: 2px 3px;
+  background: #000c;
+  color: #fff;
+  font-family: "Press Start 2P", monospace;
+  font-size: 8px;
+  line-height: 1;
+  text-shadow: 1px 1px #000;
+}
+
+.bubble {
+  position: absolute;
+  left: 50%;
+  bottom: 52px;
+  transform: translateX(-50%);
+  min-width: 72px;
+  max-width: 160px;
+  padding: 6px 7px;
+  background: #fff8e8;
+  color: #1d1712;
+  border: 2px solid #1d1712;
+  font-size: 11px;
+  line-height: 1.2;
+  box-shadow: 2px 2px 0 #1d1712;
+  pointer-events: none;
+}
+
+@keyframes bob {
+  from {
+    top: 22px;
+  }
+  to {
+    top: 20px;
+  }
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}

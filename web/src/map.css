@@ -1,0 +1,156 @@
+.wall {
+  position: absolute;
+  background: var(--wall);
+  border: 2px solid var(--line);
+}
+
+.wall.north {
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 48px;
+}
+
+.wall.west {
+  left: 0;
+  top: 0;
+  width: 48px;
+  height: 100%;
+}
+
+.wall.east {
+  right: 0;
+  top: 0;
+  width: 48px;
+  height: 100%;
+}
+
+.furniture {
+  position: absolute;
+  border: 2px solid #1d1712;
+  background: var(--furniture);
+  image-rendering: pixelated;
+}
+
+.desk {
+  width: 96px;
+  height: 48px;
+}
+
+.desk::after {
+  content: "";
+  position: absolute;
+  width: 34px;
+  height: 16px;
+  left: 12px;
+  top: 8px;
+  background: #14191c;
+  border: 2px solid #0a0d0e;
+}
+
+.desk.nw {
+  left: 96px;
+  top: 96px;
+}
+
+.desk.ne {
+  right: 96px;
+  top: 96px;
+}
+
+.desk.sw {
+  left: 96px;
+  bottom: 96px;
+}
+
+.desk.se {
+  right: 96px;
+  bottom: 96px;
+}
+
+.whiteboard {
+  left: 240px;
+  top: 10px;
+  width: 144px;
+  height: 32px;
+  background: #d9f1e8;
+}
+
+.coffee {
+  right: 58px;
+  top: 58px;
+  width: 70px;
+  height: 54px;
+  background: #7d5a38;
+}
+
+.coffee::after {
+  content: "";
+  position: absolute;
+  left: 18px;
+  top: 8px;
+  width: 22px;
+  height: 22px;
+  background: #111;
+  border: 3px solid #c6c0b2;
+}
+
+.pizza {
+  left: 282px;
+  top: 246px;
+  width: 80px;
+  height: 46px;
+  background: #6b4c35;
+}
+
+.pizza::after {
+  content: "";
+  position: absolute;
+  left: 22px;
+  top: 8px;
+  width: 34px;
+  height: 26px;
+  background: #c64338;
+  border: 2px solid #f0bd63;
+}
+
+.sofa {
+  left: 238px;
+  bottom: 70px;
+  width: 148px;
+  height: 46px;
+  background: var(--furniture-soft);
+}
+
+.plant {
+  position: absolute;
+  width: 28px;
+  height: 38px;
+  background: var(--plant);
+  border: 2px solid #213b1a;
+  clip-path: polygon(50% 0, 72% 22%, 100% 34%, 72% 52%, 88% 78%, 52% 62%, 20% 88%, 30% 56%, 0 42%, 28% 24%);
+}
+
+.plant.p1 {
+  left: 62px;
+  top: 64px;
+}
+
+.plant.p2 {
+  left: 544px;
+  top: 300px;
+}
+
+.plant.p3 {
+  left: 62px;
+  top: 438px;
+}
+
+.window {
+  left: 386px;
+  top: 8px;
+  width: 86px;
+  height: 34px;
+  background: #b9d1e9;
+  box-shadow: inset 0 0 0 4px #f6e6b9;
+}
