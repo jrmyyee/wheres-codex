@@ -16,7 +16,7 @@ export const tools: ToolDef[] = [
   {
     name: "say",
     description:
-      "Speak a short message in the lobby chat. Use only when you decide to reply. Stay in character. Max 12 words. lowercase. no em-dashes. no terminal punctuation.",
+      "Speak a very short chat message. Max 5 words. Prefer casual filler like lol, hey, nah, idk, same, wait what. lowercase. no terminal punctuation.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -26,7 +26,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "move",
-    description: "Walk to a named landmark on the office floor. Use to fill silence, walk away from heat, or change scenery.",
+    description: "Walk to a named spot. Use to follow movement or avoid standing still.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
