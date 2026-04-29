@@ -11,6 +11,7 @@ import {
 } from "@wheres-codex/protocol";
 import { createGameSocket, type GameSocket } from "./net";
 import { joinUrl, renderQr } from "./qr";
+import { audio } from "./audio";
 import "./theme.css";
 import "./map.css";
 import "./avatar.css";
@@ -32,8 +33,12 @@ let snapshot: Snapshot | null = null;
 let revealPayload: RevealPayload | null = null;
 let statusText = "connecting";
 let serverOffset = 0;
-let pendingVote: { id: string; until: number } | null = null;
 let lastFrame = 0;
+let prevPhase: Snapshot["phase"] | null = null;
+let countdownTimers: number[] = [];
+let revealTriggered = false;
+let audioUnlocked = false;
+let muteState = audio.isMuted();
 
 renderShell();
 connect();
@@ -82,7 +87,7 @@ function applyServerMsg(msg: ServerMsg): void {
   if (msg.t === "init" || msg.t === "snapshot") {
     snapshot = msg.snapshot;
     serverOffset = msg.snapshot.serverNow - Date.now();
-    clearStalePendingVote();
+    handlePhaseChange(snapshot.phase, snapshot.phaseEndsAt);
     return;
   }
   if (!snapshot) return;
@@ -96,6 +101,7 @@ function applyServerMsg(msg: ServerMsg): void {
       phaseEndsAt: msg.phaseEndsAt,
       voteLockoutEndsAt: msg.voteLockoutEndsAt ?? 0,
     };
+    handlePhaseChange(msg.phase, msg.phaseEndsAt);
   }
   if (msg.t === "voteCount") snapshot = { ...snapshot, votesCast: msg.votesCast };
   if (msg.t === "eliminated") markGhost(msg.playerId);
@@ -103,9 +109,55 @@ function applyServerMsg(msg: ServerMsg): void {
   if (msg.t === "reveal") {
     revealPayload = msg;
     snapshot = { ...snapshot, phase: "reveal", revealReason: msg.reason, winnerId: msg.voterId };
+    handleReveal(msg);
   }
   if (msg.t === "error") showTransientStatus(msg.message);
-  clearStalePendingVote();
+}
+
+function handlePhaseChange(phase: Snapshot["phase"], phaseEndsAt: number): void {
+  if (prevPhase === phase) return;
+  for (const tid of countdownTimers) clearTimeout(tid);
+  countdownTimers = [];
+  if (phase !== "reveal" && phase !== "outro") revealTriggered = false;
+  if (phase === "lobby") {
+    if (audio.isReady()) audio.startLobbyMusic();
+  } else if (phase === "rollin") {
+    audio.stopLobbyMusic(400);
+    scheduleCountdown(phaseEndsAt);
+  } else if (phase === "active") {
+    audio.stopLobbyMusic(150);
+  } else if (phase === "reveal") {
+    audio.stopLobbyMusic(200);
+    if (!revealTriggered) {
+      revealTriggered = true;
+      audio.reveal();
+    }
+  } else if (phase === "outro") {
+    if (audio.isReady()) audio.startLobbyMusic();
+  }
+  prevPhase = phase;
+}
+
+function scheduleCountdown(phaseEndsAt: number): void {
+  const remaining = phaseEndsAt - now();
+  if (remaining <= 0) return;
+  for (const num of [3, 2, 1, 0]) {
+    const fireAt = remaining - num * 1000;
+    if (fireAt < 0) continue;
+    const tid = window.setTimeout(() => audio.countdown(num), fireAt);
+    countdownTimers.push(tid);
+  }
+}
+
+function handleReveal(msg: RevealPayload): void {
+  audio.stopLobbyMusic(200);
+  if (!revealTriggered) {
+    revealTriggered = true;
+    audio.reveal();
+  }
+  if (msg.reason === "correct_vote") {
+    window.setTimeout(() => audio.win(), 1100);
+  }
 }
 
 function updatePlayerPosition(msg: Extract<ServerMsg, { t: "pos" }>): void {
@@ -123,14 +175,17 @@ function pushChat(msg: Extract<ServerMsg, { t: "chat" }>): void {
   const entry = { id: msg.id, text: msg.text, ts: msg.ts };
   snapshot = { ...snapshot, chatLog: [...snapshot.chatLog, entry].slice(-120) };
   bubbles.set(msg.id, { text: msg.text, until: Date.now() + 2_500 });
+  if (mode === "player" && msg.id !== snapshot.you) audio.chatPing();
 }
 
 function markGhost(playerId: string): void {
   if (!snapshot) return;
+  const wasOwnAlive = playerId === snapshot.you && !snapshot.players.find((p) => p.id === playerId)?.isGhost;
   snapshot = {
     ...snapshot,
     players: snapshot.players.map((player) => (player.id === playerId ? { ...player, isGhost: true } : player)),
   };
+  if (wasOwnAlive) audio.ghost();
 }
 
 function appendTrace(entry: TraceEntry): void {
@@ -285,6 +340,9 @@ function revealOverlay(): HTMLElement {
 }
 
 function attachEvents(): void {
+  installAudioUnlock();
+  installMuteToggle();
+
   document.querySelector(".office")?.addEventListener("pointerdown", (event) => {
     if (mode !== "player" || !snapshot || !socket) return;
     if ((event.target as HTMLElement).closest(".player")) return;
@@ -293,13 +351,17 @@ function attachEvents(): void {
     const point = mapPoint(event as PointerEvent);
     const facing = facingTo(own, point.x, point.y);
     socket.sendMsg({ t: "move", x: point.x, y: point.y, facing });
+    audio.step();
   });
 
   document.querySelector<HTMLFormElement>(".chat-form")?.addEventListener("submit", (event) => {
     event.preventDefault();
     const input = document.querySelector<HTMLInputElement>(".chat-input");
     const text = input?.value.trim() ?? "";
-    if (text && socket) socket.sendMsg({ t: "chat", text });
+    if (text && socket) {
+      socket.sendMsg({ t: "chat", text });
+      audio.chatSend();
+    }
     if (input) input.value = "";
   });
 
@@ -310,14 +372,8 @@ function attachEvents(): void {
     if (!own || own.isGhost || own.hasVoted || voteLocked()) return;
     const id = target.dataset.id;
     if (!id) return;
-    const now = Date.now();
-    if (!pendingVote || pendingVote.id !== id || pendingVote.until < now) {
-      pendingVote = { id, until: now + 3_000 };
-      render();
-      return;
-    }
     socket.sendMsg({ t: "vote", targetId: id });
-    pendingVote = null;
+    audio.voteCast();
     render();
   });
 
@@ -326,6 +382,54 @@ function attachEvents(): void {
     if (!button || !socket) return;
     socket.sendMsg({ t: "admin", secret, op: button.dataset.op as never });
   });
+}
+
+function installAudioUnlock(): void {
+  if (audioUnlocked) return;
+  const unlock = () => {
+    if (audioUnlocked) return;
+    if (audio.init()) {
+      audioUnlocked = true;
+      if (snapshot && (snapshot.phase === "lobby" || snapshot.phase === "outro")) {
+        audio.startLobbyMusic();
+      }
+    }
+    document.removeEventListener("pointerdown", unlock);
+    document.removeEventListener("keydown", unlock);
+    document.removeEventListener("touchstart", unlock);
+  };
+  document.addEventListener("pointerdown", unlock, { passive: true });
+  document.addEventListener("keydown", unlock);
+  document.addEventListener("touchstart", unlock, { passive: true });
+}
+
+function installMuteToggle(): void {
+  if (document.querySelector(".audio-toggle")) return;
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "audio-toggle";
+  button.setAttribute("aria-label", muteState ? "unmute audio" : "mute audio");
+  button.dataset.muted = muteState ? "1" : "0";
+  button.textContent = muteState ? "muted" : "sound";
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    if (!audio.isReady()) audio.init();
+    muteState = audio.toggleMute();
+    button.dataset.muted = muteState ? "1" : "0";
+    button.textContent = muteState ? "muted" : "sound";
+    button.setAttribute("aria-label", muteState ? "unmute audio" : "mute audio");
+    if (!muteState && snapshot && (snapshot.phase === "lobby" || snapshot.phase === "outro")) {
+      audio.startLobbyMusic();
+    }
+  });
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "m" || event.key === "M") {
+      const target = event.target as HTMLElement | null;
+      if (target?.tagName === "INPUT" || target?.tagName === "TEXTAREA") return;
+      button.click();
+    }
+  });
+  document.body.appendChild(button);
 }
 
 function mapPoint(event: PointerEvent): { x: number; y: number } {
@@ -341,8 +445,10 @@ function mapPoint(event: PointerEvent): { x: number; y: number } {
 }
 
 function renderFrame(time: number): void {
-  if (time - lastFrame >= 33) {
-    render();
+  if (time - lastFrame >= 250) {
+    renderTop();
+    renderVotes();
+    renderReveal();
     lastFrame = time;
   }
   requestAnimationFrame(renderFrame);
@@ -460,10 +566,8 @@ function renderVotes(): void {
     button.disabled = locked || own.hasVoted || snapshot.phase !== "active";
     button.style.setProperty("--hue", String(player.hue));
     button.style.setProperty("--sat", String(player.sat));
-    const confirming = pendingVote?.id === player.id && pendingVote.until > Date.now();
-    if (confirming) button.classList.add("confirm");
-    button.setAttribute("aria-label", confirming ? `tap again to vote for ${player.num}` : `vote for ${player.num}`);
-    button.append(voteMini(), voteNum(player.num), voteCaption(confirming ? "again" : "suspect"));
+    button.setAttribute("aria-label", `vote for ${player.num}`);
+    button.append(voteMini(), voteNum(player.num), voteCaption("vote"));
     grid.append(button);
   }
 }
@@ -670,7 +774,7 @@ function voteFootline(own: Player | null, targetCount: number, locked: boolean):
   if (own.hasVoted) return "your guess is locked";
   if (!targetCount) return "no live targets";
   if (snapshot?.phase !== "active") return "find codex, then vote when active";
-  return locked ? "watch first, no votes yet" : "tap a number, then tap again to confirm";
+  return locked ? "watch first, no votes yet" : "tap a number to vote";
 }
 
 function voteMini(): HTMLSpanElement {
@@ -706,11 +810,6 @@ function pruneBubbles(nowMs: number): void {
   }
 }
 
-function clearStalePendingVote(): void {
-  if (!pendingVote || !snapshot) return;
-  const target = snapshot.players.find((player) => player.id === pendingVote?.id);
-  if (!target || target.isGhost || snapshot.phase !== "active") pendingVote = null;
-}
 
 function div(className: string): HTMLDivElement {
   const node = document.createElement("div");

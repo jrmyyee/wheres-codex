@@ -1,6 +1,8 @@
 import PartySocket from "partysocket";
 import {
   LANDMARKS,
+  MAP_HEIGHT,
+  MAP_WIDTH,
   isLandmark,
   type ChatEntry,
   type ClientMsg,
@@ -173,7 +175,7 @@ function applyServerMsg(msg: ServerMsg): void {
 
 function updateLoop(): void {
   if (snapshot?.phase === "active" && !activeLoop) {
-    activeLoop = setInterval(() => void tick(), 4_000);
+    activeLoop = setInterval(() => void tick(), 2_500);
     void tick();
     return;
   }
@@ -207,10 +209,14 @@ async function tick(): Promise<void> {
   if (decision.action === "idle") return;
   busy = true;
   await sleep(decision.delayMs);
-  const input = buildTurnInput(decision.reason);
   try {
     lastTurnAt = Date.now();
-    await driver?.turn(input);
+    if (decision.action === "walk") {
+      await walkTo(walkTarget(self, decision.reason));
+      sendTrace(trace("meta", "bridge", `ambient movement: ${decision.reason}`));
+      return;
+    }
+    await driver?.turn(buildTurnInput(decision.reason));
   } catch (error) {
     sendTrace(trace("meta", "bridge", `turn failed: ${safeLog(error)}`));
   } finally {
@@ -253,6 +259,7 @@ async function walkTo(target: { x: number; y: number }): Promise<void> {
 function buildTurnInput(reason: string): string {
   const self = selfPlayer();
   const roster = snapshot?.players.map((player) => `${player.num}${player.id === self?.id ? " (you)" : ""}${player.isGhost ? " ghost" : ""}`).join(", ");
+  const moving = movementSummary(self);
   const chat = formatChat(snapshot?.chatLog.slice(-30) ?? []);
   return `${SYSTEM_ANCHOR}
 
@@ -262,14 +269,58 @@ ${persona.prompt}
 
 ${denylistPrompt}
 
-You are player ${self?.num ?? "??"} in room ${env.room}. Wake reason: ${reason}. Roster: ${roster}.
+You are player ${self?.num ?? "??"} in room ${env.room}. Wake reason: ${reason}. Roster: ${roster}. Movement: ${moving}.
 
-The ONLY tools you may use are say, move, and idle. Never call shell, apply_patch, web_search, or any other tool. If tempted to code, call idle.
+The ONLY tools you may use are say, move, and idle. Never call shell, apply_patch, web_search, or any other tool. If tempted to code, call idle. If people are roaming, moving is more natural than talking.
 
 ---
 
 Recent chat:
 ${chat || "(quiet)"}`;
+}
+
+function movementSummary(self: Player | null): string {
+  if (!snapshot || !self) return "unknown";
+  const moving = snapshot.players
+    .filter((player) => player.id !== self.id && !player.isGhost && player.moving)
+    .map((player) => `${player.num} ${player.facing}`)
+    .slice(0, 4)
+    .join(", ");
+  const nearby = snapshot.players
+    .filter((player) => player.id !== self.id && !player.isGhost && distance(player, self) < 110)
+    .map((player) => player.num)
+    .slice(0, 4)
+    .join(", ");
+  return `moving now ${moving || "none"}; nearby ${nearby || "none"}`;
+}
+
+function walkTarget(self: Player, reason: string): { x: number; y: number } {
+  const movers = snapshot?.players.filter((player) => player.id !== self.id && !player.isGhost && player.moving) ?? [];
+  if (movers.length && /movement|room/.test(reason)) {
+    const target = movers[Math.floor(Math.random() * movers.length)] ?? movers[0];
+    return {
+      x: clamp(target.x + jitterOffset(), 24, MAP_WIDTH - 48),
+      y: clamp(target.y + jitterOffset(), 48, MAP_HEIGHT - 56),
+    };
+  }
+  const landmarks = Object.values(LANDMARKS);
+  const target = landmarks[Math.floor(Math.random() * landmarks.length)] ?? LANDMARKS.coffee_station;
+  return {
+    x: clamp(target.x + jitterOffset(), 24, MAP_WIDTH - 48),
+    y: clamp(target.y + jitterOffset(), 48, MAP_HEIGHT - 56),
+  };
+}
+
+function jitterOffset(): number {
+  return (Math.floor(Math.random() * 3) - 1) * 36;
+}
+
+function distance(a: Player, b: Player): number {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, Math.round(value)));
 }
 
 function formatChat(chat: ChatEntry[]): string {

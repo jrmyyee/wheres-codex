@@ -110,6 +110,10 @@ Generated `AGENT_SECRET`, `PROJECTOR_SECRET`, and `ADMIN_SECRET` into `.env` wit
 
 Switched the live demo room from `SGN-LOCAL` to `SYD-CODEX`. Found that the agent could connect and send `agentReady=true`, then exit while idle in lobby; added a 15s `hello` heartbeat to keep the Node event loop and room snapshot alive. Detached non-TTY launches still exited, so the demo agent is currently running in a detached `screen` session named `wheres-codex-agent`.
 
+### t+02:12 — 2026-04-29T05:50:10Z — Fast demo interaction patch
+
+Patched round-start feel and voting: roll-in is 2.5s, demo vote lockout is 2s, normal vote lockout is 8s, voting is one tap instead of tap-again confirmation, full UI rerender cadence is reduced, PartyKit no longer sends redundant snapshots on every movement/phase tick. Patched Codex behavior so walk decisions move directly and prompts include nearby/moving-player context.
+
 ---
 
 ## Validation
@@ -607,6 +611,32 @@ Deployed ./src/server.ts to https://wheres-codex.jrmyyee.partykit.dev
 > tsc --noEmit
 ```
 
+`pnpm -F party exec partykit deploy --with-vars --with-env`
+```
+Authentication timed out.
+...
+Deployed ./src/server.ts to https://wheres-codex.jrmyyee.partykit.dev
+```
+
+`CI=1 vercel deploy --prod --yes -b VITE_PARTY_HOST=https://wheres-codex.jrmyyee.partykit.dev`
+```
+Production: https://codexhack-7ald2b7hm-jezzayeespam-8464s-projects.vercel.app [21s]
+Aliased: https://codexhack.vercel.app [27s]
+```
+
+`curl -i -s --max-time 20 'https://codexhack.vercel.app/?room=SYD-CODEX'`
+```
+HTTP/2 200
+content-type: text/html; charset=utf-8
+script type="module" crossorigin src="/assets/index-9b6PT8jZ.js"
+```
+
+`curl -i -s --max-time 20 'https://wheres-codex.jrmyyee.partykit.dev/parties/main/SYD-CODEX/health'`
+```
+HTTP/2 200
+{"ok":true,"room":"SYD-CODEX","phase":"lobby","players":2,"agentReady":true,"fallbackAgentEnabled":false}
+```
+
 `screen -dmS wheres-codex-agent ... ROOM=SYD-CODEX ./node_modules/.bin/tsx src/index.ts`
 ```
 There is a screen on:
@@ -616,6 +646,35 @@ There is a screen on:
 `curl -s --max-time 10 https://wheres-codex.jrmyyee.partykit.dev/parties/main/SYD-CODEX/health`
 ```
 {"ok":true,"room":"SYD-CODEX","phase":"lobby","players":1,"agentReady":true,"fallbackAgentEnabled":false}
+```
+
+### Fast demo interaction validation — 2026-04-29T05:50:10Z
+
+`source ~/.nvm/nvm.sh && nvm use >/dev/null && pnpm -F @wheres-codex/protocol typecheck`
+```
+> @wheres-codex/protocol@0.1.0 typecheck /Users/jrmyyee/Documents/Projects/codex_hack/packages/protocol
+> tsc --noEmit
+```
+
+`source ~/.nvm/nvm.sh && nvm use >/dev/null && pnpm -F party typecheck`
+```
+> party@0.1.0 typecheck /Users/jrmyyee/Documents/Projects/codex_hack/party
+> tsc --noEmit
+```
+
+`source ~/.nvm/nvm.sh && nvm use >/dev/null && pnpm -F web build`
+```
+vite v6.4.2 building for production...
+✓ 62 modules transformed.
+dist/assets/index-C0M6HyAR.css  10.41 kB │ gzip:  3.20 kB
+dist/assets/index-DeryYQ3d.js   62.38 kB │ gzip: 21.70 kB
+✓ built in 199ms
+```
+
+`source ~/.nvm/nvm.sh && nvm use >/dev/null && pnpm -F agent typecheck`
+```
+> agent@0.1.0 typecheck /Users/jrmyyee/Documents/Projects/codex_hack/agent
+> tsc --noEmit
 ```
 
 `PUBLIC_E2E round 2 — deployed PartyKit + local App Server agent + four human sockets`

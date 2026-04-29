@@ -249,7 +249,6 @@ export default class Lobby implements Party.Server {
       current.moving = false;
       this.broadcastMsg({ t: "pos", id: current.id, x: current.x, y: current.y, facing: current.facing, moving: false });
     }, 220);
-    this.send(conn, { t: "snapshot", snapshot: this.snapshotFor(player.id, conn.state?.role ?? "player") });
   }
 
   private handleChat(conn: Party.Connection<ConnState>, player: InternalPlayer | undefined, rawText: string): void {
@@ -515,7 +514,6 @@ export default class Lobby implements Party.Server {
     this.phaseEndsAt = phaseEndsAt;
     this.voteLockoutEndsAt = voteLockoutEndsAt;
     this.broadcastMsg({ t: "phase", phase, phaseEndsAt, voteLockoutEndsAt });
-    this.broadcastSnapshot();
   }
 
   private assignPlayer(role: Role, requestedSessionId: string | null): InternalPlayer | null {
