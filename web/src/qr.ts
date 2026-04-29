@@ -2,7 +2,7 @@ import * as QRCode from "qrcode";
 
 export async function renderQr(canvas: HTMLCanvasElement, url: string): Promise<void> {
   await QRCode.toCanvas(canvas, url, {
-    width: 220,
+    width: 240,
     margin: 1,
     color: {
       dark: "#15110d",
