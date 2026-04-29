@@ -1,0 +1,23 @@
+{
+  "name": "wheres-codex",
+  "version": "0.1.0",
+  "private": true,
+  "description": "a multiplayer 2d office lobby where one player is codex",
+  "packageManager": "pnpm@9.12.0",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "typecheck": "pnpm -r typecheck",
+    "build": "pnpm -F web build",
+    "dev:party": "pnpm -F party dev",
+    "dev:web": "pnpm -F web dev",
+    "dev:agent": "pnpm -F agent dev",
+    "deploy": "pnpm -F party deploy"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "tsx": "^4.19.0",
+    "@types/node": "^22.0.0"
+  }
+}
