@@ -5,9 +5,10 @@ a multiplayer 2d office lobby. 8–15 players join from their phones. nobody has
 wrong votes eliminate. first correct vote wins.
 
 ```
-play:    https://wheres-codex.<jeremy>.partykit.dev/?room=SGN-DEMO
-qr:      [printed on the demo card]
-trace:   https://wheres-codex.<jeremy>.partykit.dev/projector?room=SGN-DEMO
+play:    https://wheres-codex.<jeremy>.vercel.app/?room=SGN-DEMO
+qr:      generated on /projector from the web URL
+trace:   https://wheres-codex.<jeremy>.vercel.app/projector?room=SGN-DEMO
+ws:      https://wheres-codex.<jeremy>.partykit.dev
 ```
 
 ## what it is
@@ -18,7 +19,7 @@ vote `[07]` and you're right? you win. wrong? you're a ghost — watch the rest 
 
 ## how it works
 
-- **codex app server** is the codex agent harness exposed as a JSON-RPC stream. we feed it custom tools — `say(message)`, `move(landmark)`, `idle()` — instead of its usual coding tools. the model is `gpt-5.1-codex`. its reasoning is the entire reveal.
+- **codex app server** is the codex agent harness exposed as a JSON-RPC stream. we feed it custom tools — `say(message)`, `move(landmark)`, `idle()` — instead of its usual coding tools. `CODEX_MODEL` selects the available Codex model. its reasoning is the entire reveal.
 - **partykit** holds the room state. one durable object per room, authoritative for positions, chat, votes, and AI identity (which is never broadcast until reveal).
 - **the agent bridge** runs on a laptop in the room. it joins as a regular numbered player, ticks every few seconds, asks a cheap cadence gate "should i reply right now?", and only fires codex when the answer is yes. you can see the laptop. you can point at it.
 
@@ -36,7 +37,7 @@ pnpm -F web dev
 pnpm -F agent dev
 ```
 
-open `http://127.0.0.1:5173/?room=local` on a couple of phones (same wifi). open `http://127.0.0.1:5173/projector?room=local` on a laptop pointed at the wall.
+open `http://127.0.0.1:5173/?room=local` on a couple of phones (same wifi). open `http://127.0.0.1:5173/projector?room=local&secret=$PROJECTOR_SECRET` on a laptop pointed at the wall.
 
 ## how it was built
 

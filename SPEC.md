@@ -6,7 +6,7 @@
 **Author**: Jeremy + Claude (research-synthesised, audit-hardened).
 **Audience**: Codex itself, building autonomously from this brief, in the spirit of dkundel's "had Codex put Codex into DOOM."
 **Repo name**: `wheres-codex`
-**Public URL target**: static web app URL (`PUBLIC_WEB_URL`) that connects to PartyKit backend (`PARTY_HOST`). Do not point QR directly at the PartyKit backend unless PartyKit is explicitly serving the web app too.
+**Public URL target**: static web app URL (`PUBLIC_WEB_URL`) that connects to PartyKit backend (`PARTY_HOST`). Do not point QR directly at the PartyKit backend unless PartyKit is explicitly serving the web app too. Static hosting must rewrite `/`, `/projector`, and `/admin` to the same Vite app shell.
 **Time budget**: 6–8 hours from spec acceptance to demo-ready public URL.
 
 > **Read order for Codex**: this `SPEC.md` is the WHAT. Read `AGENTS.md` for the HOW (commands, runtime pins, allowed deps, scope rails, plan-closure rules). Maintain `PLANS.md` continuously as you build — that's where you record progress, surprises, and validation results.
@@ -183,7 +183,7 @@ For Codex to internalise. Every design choice below traces back to one of these.
 
 | Layer | Pick | Why |
 |---|---|---|
-| Multiplayer transport | **PartyKit** (Cloudflare DO) | one DO = one room = one source of truth; `npm create partykit@latest` + `npx partykit deploy` = public URL in <5 min; native WS pub/sub; free at hackathon scale. |
+| Multiplayer transport | **PartyKit** (Cloudflare DO) | one DO = one room = one source of truth; `pnpm create partykit@latest` + `npx partykit deploy` = public URL in <5 min; native WS pub/sub; free at hackathon scale. |
 | Client framework | **Vite + TS, plain DOM** | Phaser/PIXI cold-init costs 200–400 ms on Android. Plain `<div>` + `transform: translate3d()` ships in half the time and debugs in DevTools. |
 | Sprite tech | **PNG sheet + `background-position` + `image-rendering: pixelated`** | One PNG load, 16-pixel offsets, CSS `@keyframes steps(6)` for walk cycle. Survives 15 sprites at 30fps on a 3-year-old Android. See §10. |
 | Per-player tint | **`filter: hue-rotate(Xdeg) saturate(Y)`** | One sprite sheet, 15 distinct visual variants via CSS. No re-render, no asset bloat. |
@@ -191,7 +191,8 @@ For Codex to internalise. Every design choice below traces back to one of these.
 | Cadence gate | **Local heuristic first; optional Responses API** | Avoids a second model path in MVP. Heuristic: reply on direct mention/nearby suspicion, walk after silence, otherwise idle. Add model gate only after core demo is green. |
 | Persona model | **Codex App Server via `CODEX_MODEL` env** | Default to current available Codex model from `model/list` or `CODEX_MODEL` (`gpt-5.3-codex` preferred, fallback `gpt-5.1-codex` if that is all the account has). Trace is native. |
 | Fallback agent | **Responses API through same `AgentDriver` interface** | If `dynamicTools` is unworkable. See §6.5 — uses `client.responses.create({ stream: true, ... })`, emits normalized trace entries, and labels summaries truthfully. |
-| Deployment | **`npx partykit deploy`** (Cloudflare edge) | One command, free, public URL. |
+| Backend deployment | **`npx partykit deploy`** (Cloudflare edge) | One command, free, public WebSocket URL. |
+| Web deployment | **static Vite app on Vercel/Cloudflare Pages** | QR points at the web origin; all visible routes are in one app shell with SPA rewrites. |
 | Agent host | **Demo laptop** (running `pnpm -F agent dev`) | Acceptable for hackathon. Photographable: "Codex is running on this laptop right now." |
 
 ### 4.3 file structure
@@ -204,6 +205,7 @@ wheres-codex/
 ├── AGENTS.md                         # operational guide for codex
 ├── PLANS.md                          # progress log codex maintains
 ├── SPEC.md                           # this file
+├── vercel.json                       # optional Vercel static deploy config; SPA rewrites
 ├── .env.example
 ├── .gitignore
 ├── packages/
@@ -212,9 +214,7 @@ wheres-codex/
 │       └── src/index.ts              # shared WireMsg types
 ├── web/
 │   ├── package.json
-│   ├── index.html
-│   ├── projector.html                # /projector route
-│   ├── admin.html                    # /admin?secret=... host controls
+│   ├── index.html                    # single app shell for /, /projector, /admin
 │   ├── vite.config.ts
 │   ├── tsconfig.json
 │   ├── public/
@@ -223,7 +223,8 @@ wheres-codex/
 │   │       ├── sprites_indoors.png   # Kenney roguelike-indoors
 │   │       └── floor.png             # one tile sliced from above
 │   └── src/
-│       ├── main.ts                   # entry: player view
+│       ├── main.ts                   # route switch: player/projector/admin by location.pathname
+│       ├── qr.ts                     # join URL + embedded QR canvas helper
 │       ├── projector.ts              # entry: projector view
 │       ├── admin.ts                  # host controls: start, force reveal, reset, fallback
 │       ├── net.ts                    # PartySocket wrapper
@@ -259,11 +260,32 @@ wheres-codex/
 
 `packages/protocol/` is the single source of truth for `WireMsg` shapes. `party/`, `web/`, and `agent/` all import from it.
 
+### 4.4 implementation patterns proven by Saigon Rush
+
+Use `/Users/jrmyyee/Documents/Projects/saigon-rush` only as a read-only reference for ambiguity reduction:
+
+- **One static app, role routes**: mirror the proven route split in `client/src/App.tsx`, but in plain DOM. `web/src/main.ts` branches on `location.pathname` for `/`, `/projector`, and `/admin`. Do not create separate deploys or point visible routes at PartyKit.
+- **Central WebSocket wrapper**: mirror `client/src/lib/ws.ts`. `web/src/net.ts` is the only place that constructs PartySocket URLs. It always includes room, role (`as=player|projector|admin|agentPlayer`), and anonymous `sessionId` where applicable.
+- **Room URL comes from the web origin**: projector/admin build the player join URL from `window.location.origin` + `?room=...`. Never hardcode the PartyKit backend into QR/join URLs.
+- **Embedded QR plus typed code**: render a large QR in the projector/admin app using `qrcode` and also show the short room code and full URL as text. The appendix `pnpm dlx qrcode` command is a backup, not the primary demo path.
+- **Role-tagged server connections**: mirror the server-side session map shape in `server/index.ts`: one room object, role-tagged connections, explicit join/leave broadcasts, room counts visible to projector/admin.
+- **Bounded queues/buffers**: mirror Saigon's queue cap pattern. No unbounded arrays for chat, trace, pending moves, or reconnect records.
+- **Deploy split**: mirror `vercel.json` + backend env separation. The static web app serves all browser routes with rewrites; PartyKit is only the WS/state backend. Configure origin/CORS-like allowlists if the chosen PartyKit API needs them.
+
 ---
 
 ## 5. wire protocol (PartyKit room)
 
 All messages JSON. Field `t` is the discriminator. Defined in `packages/protocol/src/index.ts`.
+
+**Transport convention**: all browser/client connections go through `web/src/net.ts`. The PartySocket room is the URL `room` query param, and the connection role is the `as` query param:
+
+- Player: `as=player&sessionId=<localStorage-id>`
+- Projector: `as=projector&secret=<PROJECTOR_SECRET>`
+- Admin: `as=admin&secret=<ADMIN_SECRET>`
+- Agent: `as=agentPlayer&secret=<AGENT_SECRET>&sessionId=<agent-stable-id>`
+
+Do not duplicate WebSocket URL construction in route modules. This avoids the split-brain route/session bug Saigon Rush hit during deploy hardening.
 
 ### 5.1 client → server
 
@@ -357,6 +379,9 @@ export type ErrorCode =
 - Number assignment: server maintains `usedNums: Set<string>` per room, assigns lowest unused `01`–`15` for active/lobby humans and the AI slot.
 - `startRound` is accepted only from admin/projector-host role or admin op with valid `ADMIN_SECRET`, and only when agent is ready or fallback is explicitly enabled.
 - Reconnect: clients persist an anonymous `sessionId` in `localStorage`; server maps it to stable player id/number for a 60 s reconnect grace window.
+- Server sends a fresh `snapshot` or `roster` on every join/leave/reconnect so projector/admin can show live `joined/max`, `agentReady`, phase, and fallback status without a separate API.
+- Server stores only bounded room data: last 120 sanitized chat entries, last 240 trace entries per round, max 240 chars per trace entry, max 200 chars per chat entry, max 60 s reconnect grace records. Drop oldest entries when caps are exceeded.
+- `agentTrace` is rate-limited server-side to max 10 accepted entries / second. If exceeded, coalesce/drop excess and append one `meta` entry such as `trace throttled` rather than letting a stream flood the room.
 
 ### 5.4 trace channel (projector subscribers only)
 
@@ -780,7 +805,7 @@ The vote grid is always rendered but greyed out during the 30 s lockout window.
 
 ### 8.5 onboarding
 
-QR code → `https://wheres-codex.<jeremy>.partykit.dev/?room=SGN-XXXX`. On load:
+QR code → `$PUBLIC_WEB_URL/?room=SGN-XXXX` (for example `https://wheres-codex.<jeremy>.vercel.app/?room=SGN-XXXX`). On load:
 1. Client creates/persists anonymous `sessionId` in `localStorage`.
 2. Server assigns lowest unused two-digit number (`01`..`15`) or reconnects the existing session within grace period.
 3. Client shows a one-screen rule card: `you are 07`, `find codex`, `wrong vote eliminates you`, `correct vote reveals the trace`, `chat may be projected`.
@@ -788,6 +813,8 @@ QR code → `https://wheres-codex.<jeremy>.partykit.dev/?room=SGN-XXXX`. On load
 5. Server assigns `spriteIndex` (cycle through OpenGameArt male/female base set), random `hue` (0..359), random `sat` (0.8..1.6).
 6. Client receives `init.snapshot`, spawns sprite at assigned position (or last-used position if reconnect), starts rendering.
 7. **No name-picking, no editing.** Pure friction-free join.
+
+Projector/admin must also show the same join URL as text and as an embedded QR generated client-side from `window.location.origin`. If QR generation fails, keep the typed URL and room code visible; the appendix terminal QR command is the fallback.
 
 ### 8.6 performance
 
@@ -1125,8 +1152,8 @@ export const LANDMARKS: Record<string, {x:number; y:number}> = {
 |---|---|---|---|
 | 0 | 0:00 – 0:30 | **App Server spike + scaffold.** First prove `codex app-server` initialize/thread/turn/dynamicTools/trace event, or choose fallback. In parallel scaffold pnpm workspace only after the spike starts. | console shows one traceable event + a `say` or `move` tool call, OR `AgentDriver=responses` fallback is selected and recorded in `PLANS.md` |
 | 1 | 0:30 – 1:30 | PartyKit `Lobby` server: protocol locked, `agentPlayer`, `agentTrace`, admin/projector secrets, connect/disconnect, session reconnect, number/sprite assignment, roster, position, chat, trace buffer. | 2 browser tabs + fake agent player see move/chat; server buffers trace; admin can start/reset |
-| 2 | 1:30 – 3:00 | web client: deployable shell, QR URL, rule card, self highlight, sprites, rough office, tap-to-move, chat, vote grid (greyed), projector/admin routes. | mobile Safari loads public/local URL; `/projector` and `/admin` routes render; 4-tab multiplayer works |
-| 3 | 3:00 – 4:00 | public hosting proof + agent integration: web URL serves Vite app and connects to PartyKit; agent joins as numbered `agentPlayer`; real/fallback trace reaches projector. | phone on non-dev network can join; Codex/fallback appears as voteable number; trace buffer reaches PartyKit |
+| 2 | 1:30 – 3:00 | web client: deployable single app shell, route switch for `/`/`/projector`/`/admin`, embedded QR URL, rule card, self highlight, sprites, rough office, tap-to-move, chat, vote grid (greyed). | mobile Safari loads public/local URL; `/projector` and `/admin` routes render via the same app shell; 4-tab multiplayer works |
+| 3 | 3:00 – 4:00 | public hosting proof + agent integration: web URL serves Vite app with SPA rewrites and connects to PartyKit; agent joins as numbered `agentPlayer`; real/fallback trace reaches projector. | phone on non-dev network can join; Codex/fallback appears as voteable number; trace buffer reaches PartyKit |
 | 4 | 4:00 – 5:00 | agent bridge: connect to PartyKit room as `agentPlayer`; translate `say`/`move`/`idle` → wire msgs; local cadence heuristic; **first end-to-end round** (no reveal yet) | you can chat with Codex; it walks; it doesn't say "as an AI" |
 | 5 | 5:00 – 6:00 | voting: 30s lockout, grid logic, vote msg, eliminated handling, ghost rendering, hot-vote → reveal phase transition, server invariants | a wrong vote eliminates you (sprite goes ghost); a correct vote ends the round |
 | 6 | 6:00 – 7:00 | reveal: minimal split-screen chat log + normalized trace log, AI highlight, final outcome. No thumbnails/audio/lockstep scrubber. | reveal plays at end of round on projector + winner's phone |
@@ -1139,7 +1166,7 @@ export const LANDMARKS: Record<string, {x:number; y:number}> = {
 
 ## 12. demo flow (90 seconds)
 
-1. Project a slide: QR + room code. "join from your phone."
+1. Project `/projector?room=...&secret=...`: it shows QR + room code + joined count. "join from your phone."
 2. Audience scans. Room fills with their phones.
 3. The projector is showing the office + a black trace pane that says `capturing trace...` until reveal.
 4. Host starts demo mode. Codex is already a numbered sprite, walks, chats, and leaves trace breadcrumbs that are redacted during play.
@@ -1162,7 +1189,7 @@ Default values noted; Codex assumes defaults unless told otherwise. Ship first, 
 5. **Public room codes vs unlisted**: unlisted, share by QR [default — privacy-respecting at hackathon].
 6. **Persistence**: ephemeral [default]. Rooms vanish when empty.
 7. **Demo rooms vs single shared room**: high-entropy generated room code for each demo run [default]. `SGN-DEMO` is local-dev only.
-8. **Hosting topology**: web is deployed as a static Vite app; PartyKit is the WebSocket backend. QR points to the web origin, not directly to the PartyKit backend.
+8. **Hosting topology**: web is deployed as a static Vite app with SPA rewrites for `/`, `/projector`, and `/admin`; PartyKit is the WebSocket backend. QR points to the web origin, not directly to the PartyKit backend.
 
 Locked by design (not negotiable):
 - First correct vote wins; wrong vote eliminates voter.
@@ -1211,10 +1238,13 @@ If 1–7 are green and a real human plays without thinking "this is GPT", we won
 # scaffold (one-time)
 pnpm init
 pnpm install -w -D typescript vite tsx
-npm create partykit@latest party              # answer "lobby-server"
+pnpm create partykit@latest party             # answer "lobby-server"
+mkdir web && cd web && pnpm init && cd ..
 mkdir agent && cd agent && pnpm init && cd ..
 pnpm install --filter agent openai
 pnpm install --filter agent -D tsx @types/node
+pnpm install --filter web qrcode
+pnpm install --filter web -D @types/qrcode
 mkdir -p packages/protocol/src
 
 # dev (run each in its own terminal — but DO NOT run from inside Codex; use builds for verification)
@@ -1229,8 +1259,9 @@ codex app-server                              # stdio JSON-RPC
 # deploy
 pnpm -F party deploy                          # → https://wheres-codex.<jeremy>.partykit.dev
 # web: deploy Vite build to Vercel/Cloudflare Pages; set VITE_PARTY_HOST to deployed PartyKit host
+# static host must rewrite /, /projector, /admin to /index.html
 
-# QR
+# QR fallback if embedded projector QR is unavailable
 pnpm dlx qrcode "$PUBLIC_WEB_URL/?room=$ROOM"
 ```
 

@@ -21,6 +21,8 @@ Start with H0 only: prove Codex App Server or fallback before investing in polis
 
 After preflight is green or fallback is selected, scaffold/build serially in this order: lock packages/protocol/src/index.ts; implement PartyKit authoritative server with secrets, reconnect sessions, roster, movement, chat rate limits, trace buffer, admin/projector roles; implement mobile web, projector, and admin routes; integrate agent as agentPlayer; implement voting/ghost/reveal; deploy. Use only allowed dependencies and canonical import paths from AGENTS.md. Use 127.0.0.1, pnpm only, and timeout-wrapped dev-server probes. Never run long-lived dev commands directly.
 
+Use /Users/jrmyyee/Documents/Projects/saigon-rush as a read-only ambiguity reducer when helpful. Adapt its proven patterns only: one static app with role routes, a single role/session WebSocket wrapper, projector-generated room QR from the web origin, role-tagged server sessions, bounded queues/buffers, and static-web/backend deployment split with SPA rewrites. Do not adopt its React/Bun/Tailwind/npm stack.
+
 Parallelism rule: do not fork or split work until PLANS.md shows a green App Server or fallback-agent preflight, the protocol is locked, and the repo has the baseline commit. If those are true, suggest optional worktrees for user-run parallel sessions; do not initiate unattended parallel worktrees yourself.
 
 Verification is mandatory before claiming any phase done: run package build/typecheck commands, timeout/curl server smoke tests where relevant, paste success/status/body snippets into PLANS.md, reconcile pending items, and leave no TODO/not-implemented stubs. Optimize for a demoable public URL by hour 8: QR join, phone multiplayer, Codex as a numbered player, wrong-vote ghosting, correct/timer/host reveal with real normalized trace, and three rounds without crash.
@@ -59,6 +61,28 @@ Verification is mandatory before claiming any phase done: run package build/type
 
 (Paste here the exact commands you ran and their output. Build success lines, curl status codes + first 100 bytes of body, deploy URL on success.)
 
+### Prep — 2026-04-29T03:50:59Z
+
+`command -v codex && codex --version`
+```
+/opt/homebrew/bin/codex
+WARNING: proceeding, even though we could not update PATH: Operation not permitted (os error 1)
+codex-cli 0.125.0
+```
+
+`codex app-server --help`
+```
+WARNING: proceeding, even though we could not update PATH: Operation not permitted (os error 1)
+[experimental] Run the app server or related tooling
+Usage: codex app-server [OPTIONS] [COMMAND]
+Commands: proxy, generate-ts, generate-json-schema, help
+```
+
+`node -e "JSON.parse(require('fs').readFileSync('vercel.json','utf8')); console.log('vercel.json valid')"`
+```
+vercel.json valid
+```
+
 ---
 
 ## Surprises & Discoveries
@@ -70,6 +94,8 @@ Verification is mandatory before claiming any phase done: run package build/type
 ## Decisions
 
 (When you make a choice not explicit in SPEC.md, record it here. One line: `<decision> — <reason>`.)
+
+- Saigon Rush implementation is a read-only reference — it already solved role routes, QR/lobby flow, session WebSocket wrappers, buffer caps, and static-web/backend deploy split for a real hackathon game.
 
 ---
 

@@ -1,0 +1,11 @@
+{
+  "framework": null,
+  "buildCommand": "corepack enable && pnpm -F web build",
+  "outputDirectory": "web/dist",
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}

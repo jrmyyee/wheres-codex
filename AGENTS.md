@@ -10,6 +10,20 @@ You're building `wheres-codex` — a multiplayer 2D office-lobby game where one 
 
 ---
 
+## Proven Reference: Saigon Rush
+
+`/Users/jrmyyee/Documents/Projects/saigon-rush` is a previous real-time hackathon game. Treat it as read-only implementation reference only — adapt patterns, do not copy its React/Bun/Tailwind stack or npm workflow.
+
+Useful files to inspect if ambiguity appears:
+
+- `/Users/jrmyyee/Documents/Projects/saigon-rush/client/src/App.tsx` — one static client app owns multiple role routes.
+- `/Users/jrmyyee/Documents/Projects/saigon-rush/client/src/lib/ws.ts` — centralized role/session WebSocket wrapper with reconnect.
+- `/Users/jrmyyee/Documents/Projects/saigon-rush/client/src/pages/GameScreen.tsx` — room code, join URL, embedded QR, live count patterns.
+- `/Users/jrmyyee/Documents/Projects/saigon-rush/server/index.ts` — per-session map, role-tagged sockets, queue caps, deterministic fallback.
+- `/Users/jrmyyee/Documents/Projects/saigon-rush/vercel.json` and `fly.toml` — static web deploy split from WebSocket backend with SPA rewrites and origin env.
+
+---
+
 ## Runtime (pinned)
 
 - Node **22.x target runtime** (`.nvmrc` pins `22.15.0`). If the local shell is newer, record it in `PLANS.md` and continue unless a dependency/runtime check fails. Do not intentionally downgrade/upgrade Node mid-build without user approval.
@@ -33,12 +47,14 @@ runtime:
   partyserver           ^0.0.x   (party/, the new export path)
   partysocket           ^1.x     (web/ + agent/)
   openai                ^5.x     (agent/, for Responses API + cadence gate)
+  qrcode                ^1.5.4   (web/, projector/admin embedded join QR)
   vite                  ^6.x     (web/)
   typescript            ^5.6     (all)
   tsx                   ^4.x     (agent/, for dev runtime)
 
 dev:
   @types/node           ^22.x
+  @types/qrcode         ^1.5.4   (web/)
   @types/web            latest   (web/, DOM types)
 ```
 
@@ -62,7 +78,7 @@ import OpenAI from 'openai';                       // standard
 
 You may edit files under:
 ```
-web/   party/   agent/   packages/   package.json   pnpm-lock.yaml   PLANS.md   .env.example   .nvmrc
+web/   party/   agent/   packages/   package.json   pnpm-lock.yaml   PLANS.md   .env.example   .nvmrc   vercel.json
 ```
 
 Do not touch:
@@ -86,7 +102,7 @@ If you believe one of the read-only files needs updating, write a "Proposed chan
 
 - `rm -rf`, `git restore`, `git reset --hard`, `git clean -fd`, `git push --force`
 - `sudo`, anything outside the workspace
-- Any network call beyond `pnpm install`, `pnpm dlx`, `npx partykit deploy`, `wget`/`curl` for the asset URLs in SPEC §10.2, and OpenAI API calls
+- Any network call beyond `pnpm install`, `pnpm create partykit@latest`, `pnpm dlx`, `npx partykit deploy`, `wget`/`curl` for the asset URLs in SPEC §10.2, and OpenAI API calls
 
 ## DO NOT RUN — these block forever
 
@@ -203,6 +219,13 @@ for await (const event of stream) { /* ... */ }
 - Broadcast: `this.room.broadcast(JSON.stringify(msg))` to all, or iterate `this.room.getConnections()` and filter by tag.
 - iOS Safari kills WebSockets when the tab backgrounds — your client must listen to `visibilitychange` and reconnect.
 - The dev server binds **IPv4 only** at `127.0.0.1:1999`. Use that, not `localhost`.
+
+## Static Web Deploy Rules
+
+- Use one Vite app shell for `/`, `/projector`, and `/admin`; branch in `web/src/main.ts` by `location.pathname`.
+- Static hosts must rewrite all visible routes to `/index.html` (`vercel.json` is preseeded for this).
+- QR/join URLs are built from `window.location.origin` plus `?room=...`; only WebSocket URLs use `VITE_PARTY_HOST`.
+- Keep `web/src/net.ts` as the only place that constructs PartySocket clients.
 
 ## Mobile UX guardrails
 
