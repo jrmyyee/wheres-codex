@@ -17,6 +17,14 @@ You're building `wheres-codex` — a multiplayer 2D office-lobby game where one 
 - TypeScript **5.6** strict.
 - Use **`127.0.0.1`** in URLs, not `localhost` (macOS resolves `localhost` → IPv6 `::1`, several dev servers bind IPv4 only).
 
+If `node --version` is not Node 22, activate the pinned runtime in the current shell:
+
+```bash
+source ~/.nvm/nvm.sh && nvm use && export PATH="$NVM_BIN:$PATH"
+node --version
+pnpm --version
+```
+
 ## Allowed dependencies (allowlist — do not add others without approval)
 
 ```
