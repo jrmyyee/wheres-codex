@@ -33,11 +33,12 @@ let revealPayload: RevealPayload | null = null;
 let statusText = "connecting";
 let serverOffset = 0;
 let pendingVote: { id: string; until: number } | null = null;
+let lastFrame = 0;
 
 renderShell();
 connect();
 installViewportFix();
-setInterval(render, 500);
+requestAnimationFrame(renderFrame);
 
 function routeMode(): Mode {
   if (window.location.pathname.startsWith("/projector")) return "projector";
@@ -81,6 +82,7 @@ function applyServerMsg(msg: ServerMsg): void {
   if (msg.t === "init" || msg.t === "snapshot") {
     snapshot = msg.snapshot;
     serverOffset = msg.snapshot.serverNow - Date.now();
+    clearStalePendingVote();
     return;
   }
   if (!snapshot) return;
@@ -103,6 +105,7 @@ function applyServerMsg(msg: ServerMsg): void {
     snapshot = { ...snapshot, phase: "reveal", revealReason: msg.reason, winnerId: msg.voterId };
   }
   if (msg.t === "error") showTransientStatus(msg.message);
+  clearStalePendingVote();
 }
 
 function updatePlayerPosition(msg: Extract<ServerMsg, { t: "pos" }>): void {
@@ -156,7 +159,7 @@ function renderShell(): void {
 
 function playerView(): HTMLElement {
   const screen = div("screen player-screen");
-  screen.append(topbar(), mapShell(), votePanel(), chatPanel(), revealOverlay());
+  screen.append(topbar(), ruleStrip(), mapShell(), votePanel(), chatPanel(), revealOverlay());
   return screen;
 }
 
@@ -178,8 +181,18 @@ function adminView(): HTMLElement {
 
 function topbar(): HTMLElement {
   const bar = div("topbar");
-  bar.append(div("topline"), div("identity"), div("subtle"));
+  bar.append(div("topline"), div("identity-row"), div("subtle"));
   return bar;
+}
+
+function ruleStrip(): HTMLElement {
+  const strip = div("rule-strip");
+  for (const text of ["find codex", "wrong vote ghosts you", "correct vote reveals trace", "chat may project"]) {
+    const item = div("rule-pill");
+    item.textContent = text;
+    strip.append(item);
+  }
+  return strip;
 }
 
 function mapShell(): HTMLElement {
@@ -209,7 +222,7 @@ function mapShell(): HTMLElement {
 
 function votePanel(): HTMLElement {
   const panel = div("vote-panel");
-  panel.append(div("vote-head"), div("vote-grid"));
+  panel.append(div("vote-head"), div("vote-grid"), div("vote-foot"));
   return panel;
 }
 
@@ -233,7 +246,7 @@ function chatPanel(): HTMLElement {
 
 function roomPanel(): HTMLElement {
   const panel = div("panel room-panel");
-  panel.append(div("room-title"), document.createElement("canvas"), div("subtle join-text"), div("subtle count-text"));
+  panel.append(div("room-kicker"), div("room-title"), document.createElement("canvas"), div("join-text"), div("subtle count-text"));
   panel.querySelector("canvas")?.classList.add("qr");
   return panel;
 }
@@ -246,7 +259,7 @@ function tracePanel(): HTMLElement {
 
 function adminPanel(): HTMLElement {
   const panel = div("panel");
-  const title = div("room-title");
+  const title = div("panel-title");
   title.textContent = "host";
   const actions = div("admin-actions");
   for (const [label, op] of [
@@ -274,6 +287,7 @@ function revealOverlay(): HTMLElement {
 function attachEvents(): void {
   document.querySelector(".office")?.addEventListener("pointerdown", (event) => {
     if (mode !== "player" || !snapshot || !socket) return;
+    if ((event.target as HTMLElement).closest(".player")) return;
     const own = ownPlayer();
     if (!own || own.isGhost) return;
     const point = mapPoint(event as PointerEvent);
@@ -292,6 +306,8 @@ function attachEvents(): void {
   document.querySelector(".vote-grid")?.addEventListener("click", (event) => {
     const target = (event.target as HTMLElement).closest<HTMLButtonElement>(".vote-tile");
     if (!target || !socket) return;
+    const own = ownPlayer();
+    if (!own || own.isGhost || own.hasVoted || voteLocked()) return;
     const id = target.dataset.id;
     if (!id) return;
     const now = Date.now();
@@ -319,9 +335,17 @@ function mapPoint(event: PointerEvent): { x: number; y: number } {
   const x = ((event.clientX - rect.left) / rect.width) * MAP_WIDTH;
   const y = ((event.clientY - rect.top) / rect.height) * MAP_HEIGHT;
   return {
-    x: clamp(x - 24, 24, MAP_WIDTH - 48),
-    y: clamp(y - 48, 48, MAP_HEIGHT - 56),
+    x: clamp(snap(x - 24, 24), 24, MAP_WIDTH - 48),
+    y: clamp(snap(y - 48, 24), 48, MAP_HEIGHT - 56),
   };
+}
+
+function renderFrame(time: number): void {
+  if (time - lastFrame >= 33) {
+    render();
+    lastFrame = time;
+  }
+  requestAnimationFrame(renderFrame);
 }
 
 function render(): void {
@@ -344,11 +368,29 @@ function scaleOffice(): void {
 
 function renderTop(): void {
   const top = document.querySelector(".topline");
-  if (top) setText(top, `${room}  ${timeLeft()}  ${playerCount()}`);
-  const identity = document.querySelector(".identity");
-  if (identity) setText(identity, identityText());
+  if (top) renderTopline(top);
+  const identity = document.querySelector(".identity-row");
+  if (identity) renderIdentity(identity);
   const subtle = document.querySelector(".topbar .subtle");
   if (subtle) setText(subtle, statusLine());
+}
+
+function renderTopline(top: Element): void {
+  top.textContent = "";
+  top.append(statusBadge(room), statusBadge(phaseLabel()), statusBadge(timeLeft()), statusBadge(playerCount()));
+}
+
+function renderIdentity(identity: Element): void {
+  identity.textContent = "";
+  const own = ownPlayer();
+  const label = div("identity");
+  label.textContent = identityText();
+  identity.append(label);
+  if (mode === "player" && own) {
+    const state = div(`state-chip ${own.isGhost ? "danger" : ""}`);
+    state.textContent = own.isGhost ? "ghost" : own.hasVoted ? "vote locked" : "live";
+    identity.append(state);
+  }
 }
 
 function renderPlayers(): void {
@@ -356,6 +398,7 @@ function renderPlayers(): void {
   if (!layer || !snapshot) return;
   layer.textContent = "";
   const now = Date.now();
+  pruneBubbles(now);
   for (const player of snapshot.players) {
     const node = div(`player ${playerClass(player)}`);
     node.style.setProperty("--x", `${player.x}px`);
@@ -386,26 +429,41 @@ function playerClass(player: Player): string {
 }
 
 function renderVotes(): void {
+  const panel = document.querySelector<HTMLElement>(".vote-panel");
   const head = document.querySelector(".vote-head");
   const grid = document.querySelector(".vote-grid");
-  if (!head || !grid || !snapshot || mode !== "player") return;
+  const foot = document.querySelector(".vote-foot");
+  if (!panel || !head || !grid || !foot || mode !== "player") return;
   grid.textContent = "";
-  const own = ownPlayer();
-  const locked = voteLocked();
-  setText(head, locked ? `vote in ${lockoutLeft()}` : "vote");
-  if (!own || own.isGhost || snapshot.phase === "reveal") {
-    setText(head, "spectating");
+  foot.textContent = "";
+  panel.removeAttribute("data-lockout");
+  if (!snapshot) {
+    setText(head, "vote grid");
+    setText(foot, "connecting");
     return;
   }
-  for (const player of snapshot.players) {
-    if (player.id === own.id || player.isGhost) continue;
+  const own = ownPlayer();
+  const locked = voteLocked();
+  const targets = voteTargets(own);
+  setText(head, voteHeadline(own, locked));
+  setText(foot, voteFootline(own, targets.length, locked));
+  panel.classList.toggle("vote-disabled", locked || !own || own.isGhost || own.hasVoted || snapshot.phase !== "active");
+  if (locked && snapshot.phase === "active") panel.dataset.lockout = `vote in ${lockoutLeft()}`;
+  if (!own || own.isGhost || snapshot.phase === "reveal" || snapshot.phase === "outro") {
+    return;
+  }
+  for (const player of targets) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "vote-tile";
     button.dataset.id = player.id;
-    button.disabled = locked || own.hasVoted;
-    if (pendingVote?.id === player.id && pendingVote.until > Date.now()) button.classList.add("confirm");
-    button.textContent = pendingVote?.id === player.id ? "again" : player.num;
+    button.disabled = locked || own.hasVoted || snapshot.phase !== "active";
+    button.style.setProperty("--hue", String(player.hue));
+    button.style.setProperty("--sat", String(player.sat));
+    const confirming = pendingVote?.id === player.id && pendingVote.until > Date.now();
+    if (confirming) button.classList.add("confirm");
+    button.setAttribute("aria-label", confirming ? `tap again to vote for ${player.num}` : `vote for ${player.num}`);
+    button.append(voteMini(), voteNum(player.num), voteCaption(confirming ? "again" : "suspect"));
     grid.append(button);
   }
 }
@@ -420,15 +478,21 @@ function renderChat(): void {
     log.append(line);
   }
   const input = document.querySelector<HTMLInputElement>(".chat-input");
-  if (input) input.disabled = ownPlayer()?.isGhost ?? false;
+  const button = document.querySelector<HTMLButtonElement>(".chat-form button");
+  const ghost = ownPlayer()?.isGhost ?? false;
+  if (input) {
+    input.disabled = ghost;
+    input.placeholder = ghost ? "ghosts cannot chat" : "say something";
+  }
+  if (button) button.disabled = ghost;
 }
 
 function renderTrace(): void {
   const panel = document.querySelector(".trace-panel");
   if (!panel) return;
-  panel.textContent = "";
   const lines = traceLines(false);
-  panel.textContent = lines.length ? lines.join("\n") : "capturing trace...";
+  const header = [`live trace`, `phase: ${snapshot?.phase ?? "connecting"}  votes: ${snapshot?.votesCast ?? 0}`];
+  panel.textContent = [...header, "", ...(lines.length ? lines : ["capturing trace..."])].join("\n");
 }
 
 function renderReveal(): void {
@@ -444,19 +508,26 @@ function renderReveal(): void {
   const title = document.createElement("h2");
   title.textContent = revealTitle();
   chatPane.append(title);
+  const meta = div("reveal-meta");
+  meta.textContent = revealMeta();
+  chatPane.append(meta);
   const chat = revealPayload?.chatLog ?? snapshot.chatLog.slice(-60);
   for (const entry of chat) {
     const line = div(`chat-line ${entry.id === revealPayload?.aiId ? "ai" : ""}`);
     line.textContent = `${numFor(entry.id)}: ${entry.text}`;
     chatPane.append(line);
   }
-  tracePane.textContent = traceLines(true).join("\n");
+  const lines = traceLines(true);
+  tracePane.textContent = lines.length ? [...lines, finalTraceLine()].join("\n") : "trace buffer empty\n" + finalTraceLine();
 }
 
 function renderRoomPanels(): void {
+  for (const kicker of document.querySelectorAll(".room-kicker")) setText(kicker, "scan to join");
   for (const title of document.querySelectorAll(".room-title")) setText(title, room);
   for (const join of document.querySelectorAll(".join-text")) setText(join, joinUrl(room));
-  for (const count of document.querySelectorAll(".count-text")) setText(count, `${playerCount()}  ${statusText}`);
+  for (const count of document.querySelectorAll(".count-text")) {
+    setText(count, `${playerCount()} joined  ${statusText}  agent ${snapshot?.agentReady ? "ready" : "waiting"}`);
+  }
 }
 
 function traceLines(full: boolean): string[] {
@@ -471,10 +542,15 @@ function traceLines(full: boolean): string[] {
 }
 
 function tracePreviewText(entry: TraceEntry): string {
-  if (entry.kind === "tool") return `tool call captured`;
+  if (entry.kind === "tool") return `tool call: ${toolPreview(entry.text)}`;
   if (entry.kind === "reasoning") return entry.source.endsWith("summary") ? "reasoning summary available" : "reasoning captured";
   if (entry.kind === "agentMessage") return "agent message captured";
   return entry.text || "capturing trace";
+}
+
+function toolPreview(text: string): string {
+  const name = text.trim().split(/[\s({:]/)[0] || "captured";
+  return name.slice(0, 24);
 }
 
 function revealTitle(): string {
@@ -483,6 +559,20 @@ function revealTitle(): string {
   if (revealPayload?.reason === "timer") return `codex escaped as ${aiNum}`;
   if (revealPayload?.reason === "all_eliminated") return `codex cleared the room`;
   return `trace reveal`;
+}
+
+function revealMeta(): string {
+  const aiNum = revealPayload?.aiId ? numFor(revealPayload.aiId) : "??";
+  if (revealPayload?.reason === "correct_vote") return `${numFor(revealPayload.voterId ?? "")} found ${aiNum}`;
+  if (revealPayload?.reason === "host") return `host forced the reveal; codex was ${aiNum}`;
+  const humans = snapshot?.players.filter((player) => !player.isGhost && player.id !== revealPayload?.aiId).length ?? 0;
+  return `${humans} humans remained`;
+}
+
+function finalTraceLine(): string {
+  const aiNum = revealPayload?.aiId ? numFor(revealPayload.aiId) : "??";
+  if (revealPayload?.reason === "correct_vote") return `> round complete. codex detected as ${aiNum}.`;
+  return `> round complete. codex was ${aiNum}.`;
 }
 
 function ownPlayer(): Player | null {
@@ -498,6 +588,15 @@ function identityText(): string {
   if (mode !== "player") return "find codex";
   const own = ownPlayer();
   return own ? `you are ${own.num}` : "joining";
+}
+
+function phaseLabel(): string {
+  if (!snapshot) return "connecting";
+  if (snapshot.phase === "rollin") return "starting";
+  if (snapshot.phase === "active") return "active";
+  if (snapshot.phase === "reveal") return "reveal";
+  if (snapshot.phase === "outro") return "resetting";
+  return "lobby";
 }
 
 function statusLine(): string {
@@ -544,6 +643,73 @@ function facingTo(player: Player, x: number, y: number): Facing {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, Math.round(value)));
+}
+
+function snap(value: number, step: number): number {
+  return Math.round(value / step) * step;
+}
+
+function voteTargets(own: Player | null): Player[] {
+  if (!snapshot || !own) return [];
+  return snapshot.players.filter((player) => player.id !== own.id && !player.isGhost);
+}
+
+function voteHeadline(own: Player | null, locked: boolean): string {
+  if (!own) return "vote grid";
+  if (own.isGhost) return "ghosted";
+  if (snapshot?.phase === "lobby") return "vote opens after start";
+  if (snapshot?.phase === "rollin") return "watch the room";
+  if (snapshot?.phase === "reveal") return "trace reveal";
+  if (own.hasVoted) return "vote locked";
+  return locked ? `vote in ${lockoutLeft()}` : "vote";
+}
+
+function voteFootline(own: Player | null, targetCount: number, locked: boolean): string {
+  if (!own) return "waiting for your number";
+  if (own.isGhost) return "wrong voters become ghosts";
+  if (own.hasVoted) return "your guess is locked";
+  if (!targetCount) return "no live targets";
+  if (snapshot?.phase !== "active") return "find codex, then vote when active";
+  return locked ? "watch first, no votes yet" : "tap a number, then tap again to confirm";
+}
+
+function voteMini(): HTMLSpanElement {
+  const mini = document.createElement("span");
+  mini.className = "vote-mini";
+  return mini;
+}
+
+function voteNum(num: string): HTMLSpanElement {
+  const node = document.createElement("span");
+  node.className = "vote-num";
+  node.textContent = num;
+  return node;
+}
+
+function voteCaption(text: string): HTMLSpanElement {
+  const node = document.createElement("span");
+  node.className = "vote-caption";
+  node.textContent = text;
+  return node;
+}
+
+function statusBadge(text: string): HTMLSpanElement {
+  const node = document.createElement("span");
+  node.className = "status-badge";
+  node.textContent = text;
+  return node;
+}
+
+function pruneBubbles(nowMs: number): void {
+  for (const [id, bubble] of bubbles) {
+    if (bubble.until <= nowMs) bubbles.delete(id);
+  }
+}
+
+function clearStalePendingVote(): void {
+  if (!pendingVote || !snapshot) return;
+  const target = snapshot.players.find((player) => player.id === pendingVote?.id);
+  if (!target || target.isGhost || snapshot.phase !== "active") pendingVote = null;
 }
 
 function div(className: string): HTMLDivElement {
