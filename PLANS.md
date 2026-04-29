@@ -79,6 +79,25 @@ Implemented a single Vite app for player/projector/admin routes with QR, office 
 
 User confirmed they want a singular coordination thread using worktrees/subagents. Main thread remains coordinator and critical-path integrator; current checkpoint will be committed so worktrees inherit the same protocol/server/web/agent baseline. First known integration blocker: local e2e timed out waiting for real agent readiness because the PartyKit smoke used env loading that left protected agent/projector/admin role secrets mismatched or blank in dev, causing `agentReady`/`agentTrace` to be rejected.
 
+Created checkpoint commit `6bf8435 Scaffold wheres-codex playable baseline`, then created worktrees:
+- `../wheres-codex-web` on `web-slice` — Worker Sartre owns `web/**`.
+- `../wheres-codex-party` on `party-slice` — Worker Singer owns `party/**`.
+- `../wheres-codex-agent` on `agent-slice` — Worker Lovelace owns `agent/**`.
+
+Coordinator/main owns PLANS.md, integration, local e2e/deploy scripts, merges, and final validation. Workers were told not to edit PLANS.md or cross owned paths.
+
+### t+01:04 — 2026-04-29T04:58:20Z — Web worker slice merged
+
+Merged Worker Sartre's `web-slice` commit `519e01c Polish web demo UX` into main. Changes improve mobile flow, grid-snapped movement, visible rules, vote lockout/confirm/ghost states, larger QR, and clearer projector/admin trace/reveal layout.
+
+### t+01:11 — 2026-04-29T05:05:20Z — Party worker slice merged
+
+Merged Worker Singer's `party-slice` commit `49fe453 Harden PartyKit server rules` into main, with one coordinator correction before merge: reveal trace remains included for all clients at reveal time per SPEC, while live trace remains projector/admin-only. Party hardening adds localhost-only dev secret fallbacks, safer socket send/close wrappers, stricter role/session ownership, trace input validation, admin op validation, and tighter phase rules.
+
+### t+01:18 — 2026-04-29T05:12:40Z — Agent worker slice merged
+
+Merged Worker Lovelace's `agent-slice` commit `5d28e5f Harden agent driver startup` into main, with coordinator corrections to keep the proven App Server protocol shape (`initialized` without params, text input includes `text_elements: []`). Agent now has safer root `.env` discovery without secret echoing, sanitized App Server stderr, startup timeouts, broader approval interception, queued trace before room snapshot, clearer startup logs, and Responses fallback behind the same driver interface.
+
 ---
 
 ## Validation
@@ -309,6 +328,164 @@ TypeError: Can't call WebSocket send() after close().
 ```
 
 Interpretation: fake-agent WS smoke passed; real-agent e2e currently blocked on dev env/role handling and possibly App Server notification network/auth behavior. Coordinator/main thread owns this blocker unless delegated after worktree split.
+
+### Local e2e green — 2026-04-29T04:50:38Z
+
+`bash /tmp/wheres-codex-local-e2e.sh` (approved local PartyKit + real agent smoke; sourced `.env` for OpenAI auth without printing it; used dev-only local PartyKit role secrets consistently via `--var`)
+```
+{
+  "agentNum": "03",
+  "agentReady": true,
+  "traceEvents": 4,
+  "wrongVoteGhosted": true,
+  "revealReason": "correct_vote",
+  "revealTrace": 4,
+  "aiIdMatches": true,
+  "totalEvents": 75
+}
+--- party log ---
+🎈 PartyKit v0.0.114
+Build succeeded, starting server...
+[pk:inf] Ready on http://0.0.0.0:1999
+[pk:inf] - http://127.0.0.1:1999
+[pk:inf] GET /parties/main/SGN-E2E 200 OK (5ms)
+[pk:inf] GET /parties/main/SGN-E2E 101 Switching Protocols
+--- agent log ---
+> agent@0.1.0 dev /Users/jrmyyee/Documents/Projects/codex_hack/agent
+> tsx src/index.ts
+```
+
+Follow-up: the first failed real-agent e2e was caused by inconsistent local smoke secrets from `.env`/dev vars, not a core protocol failure. The App Server startup warning did not recur after rerun with consistent role secrets and `.env` available.
+
+### Web slice merge validation — 2026-04-29T04:58:20Z
+
+`source ~/.nvm/nvm.sh && nvm use && export PATH="$NVM_BIN:$PATH" && pnpm -F web typecheck`
+```
+Found '/Users/jrmyyee/Documents/Projects/codex_hack/.nvmrc' with version <22.15.0>
+Now using node v22.15.0 (npm v11.6.2)
+
+> web@0.1.0 typecheck /Users/jrmyyee/Documents/Projects/codex_hack/web
+> tsc --noEmit
+```
+
+`source ~/.nvm/nvm.sh && nvm use && export PATH="$NVM_BIN:$PATH" && pnpm -F web build`
+```
+vite v6.4.2 building for production...
+✓ 61 modules transformed.
+dist/index.html                  0.71 kB │ gzip:  0.38 kB
+dist/assets/index-DRIq51tw.css  10.64 kB │ gzip:  3.28 kB
+dist/assets/index-B0Hpbuyw.js   53.32 kB │ gzip: 19.35 kB
+✓ built in 165ms
+```
+
+### Party slice merge validation — 2026-04-29T05:05:20Z
+
+`source ~/.nvm/nvm.sh && nvm use && export PATH="$NVM_BIN:$PATH" && pnpm -F party typecheck`
+```
+Found '/Users/jrmyyee/Documents/Projects/codex_hack/.nvmrc' with version <22.15.0>
+Now using node v22.15.0 (npm v11.6.2)
+
+> party@0.1.0 typecheck /Users/jrmyyee/Documents/Projects/codex_hack/party
+> tsc --noEmit
+```
+
+`bash /tmp/wheres-codex-local-e2e.sh` (approved local PartyKit + real agent smoke after party merge)
+```
+{
+  "agentNum": "03",
+  "agentReady": true,
+  "traceEvents": 8,
+  "wrongVoteGhosted": true,
+  "revealReason": "correct_vote",
+  "revealTrace": 6,
+  "aiIdMatches": true,
+  "totalEvents": 83
+}
+--- party log ---
+🎈 PartyKit v0.0.114
+Build succeeded, starting server...
+[pk:inf] Ready on http://0.0.0.0:1999
+[pk:inf] - http://127.0.0.1:1999
+[pk:inf] GET /parties/main/SGN-E2E 200 OK (6ms)
+[pk:inf] GET /parties/main/SGN-E2E 101 Switching Protocols
+--- agent log ---
+> agent@0.1.0 dev /Users/jrmyyee/Documents/Projects/codex_hack/agent
+> tsx src/index.ts
+```
+
+### Agent slice merge validation — 2026-04-29T05:12:40Z
+
+`source ~/.nvm/nvm.sh && nvm use && export PATH="$NVM_BIN:$PATH" && pnpm -F agent typecheck`
+```
+Found '/Users/jrmyyee/Documents/Projects/codex_hack/.nvmrc' with version <22.15.0>
+Now using node v22.15.0 (npm v11.6.2)
+
+> agent@0.1.0 typecheck /Users/jrmyyee/Documents/Projects/codex_hack/agent
+> tsc --noEmit
+```
+
+`bash /tmp/wheres-codex-local-e2e.sh` (approved local PartyKit + real agent smoke after agent merge)
+```
+{
+  "agentNum": "03",
+  "agentReady": true,
+  "traceEvents": 6,
+  "wrongVoteGhosted": true,
+  "revealReason": "correct_vote",
+  "revealTrace": 3,
+  "aiIdMatches": true,
+  "totalEvents": 77
+}
+--- agent log ---
+[agent] env loaded files=1; OPENAI_API_KEY=present; AGENT_SECRET=present; room=SGN-E2E; party_host=127.0.0.1:1999
+[agent] starting Codex App Server driver
+[agent] driver ready via appserver; model=gpt-5.3-codex
+[agent] agentReady=true sent after init
+```
+
+### Full local validation — 2026-04-29T05:15:40Z
+
+`source ~/.nvm/nvm.sh && nvm use && export PATH="$NVM_BIN:$PATH" && pnpm -F @wheres-codex/protocol typecheck`
+```
+> @wheres-codex/protocol@0.1.0 typecheck /Users/jrmyyee/Documents/Projects/codex_hack/packages/protocol
+> tsc --noEmit
+```
+
+`source ~/.nvm/nvm.sh && nvm use && export PATH="$NVM_BIN:$PATH" && pnpm -F party build`
+```
+> party@0.1.0 build /Users/jrmyyee/Documents/Projects/codex_hack/party
+> tsc --noEmit
+```
+
+`source ~/.nvm/nvm.sh && nvm use && export PATH="$NVM_BIN:$PATH" && pnpm -F web build`
+```
+vite v6.4.2 building for production...
+✓ 61 modules transformed.
+dist/index.html                  0.71 kB │ gzip:  0.38 kB
+dist/assets/index-DRIq51tw.css  10.64 kB │ gzip:  3.28 kB
+dist/assets/index-B0Hpbuyw.js   53.32 kB │ gzip: 19.35 kB
+✓ built in 199ms
+```
+
+`source ~/.nvm/nvm.sh && nvm use && export PATH="$NVM_BIN:$PATH" && pnpm -F agent build`
+```
+> agent@0.1.0 build /Users/jrmyyee/Documents/Projects/codex_hack/agent
+> tsc --noEmit
+```
+
+`bash /tmp/wheres-codex-local-e2e.sh`
+```
+{
+  "agentNum": "03",
+  "agentReady": true,
+  "traceEvents": 6,
+  "wrongVoteGhosted": true,
+  "revealReason": "correct_vote",
+  "revealTrace": 3,
+  "aiIdMatches": true,
+  "totalEvents": 77
+}
+```
 
 ---
 
