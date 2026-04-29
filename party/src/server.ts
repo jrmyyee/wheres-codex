@@ -12,6 +12,7 @@ import {
   MAX_HUMANS_LOBBY,
   MAX_PLAYERS_TOTAL,
   MOVE_MIN_INTERVAL_MS,
+  OUTRO_MS,
   RECONNECT_GRACE_MS,
   REVEAL_MS,
   ROLLIN_MS,
@@ -20,6 +21,7 @@ import {
   TRACE_RATE_LIMIT_PER_SEC,
   VOTE_LOCKOUT_DEMO_MS,
   VOTE_LOCKOUT_MS,
+  type AdminOp,
   type ChatEntry,
   type ClientMsg,
   type ErrorCode,
@@ -32,6 +34,8 @@ import {
   type Snapshot,
   type TraceEntry,
   type TraceEntryInput,
+  type TraceKind,
+  type TraceSource,
 } from "@wheres-codex/protocol";
 
 type Env = {
@@ -46,6 +50,7 @@ type ConnState = {
   role: Role;
   playerId?: string;
   sessionId?: string;
+  localDev: boolean;
 };
 
 type InternalPlayer = Player & {
@@ -81,6 +86,11 @@ const BAD_WORDS = ["faggot", "nigger", "retard", "kys"];
 const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
 const ENV_PATTERN = /(sk-[a-zA-Z0-9_-]{16,}|[A-Z0-9_]{12,}=[^\s]+)/g;
 const URL_SECRET_PATTERN = /(https?:\/\/[^\s?]+)\?[^\s]+/g;
+const LOCAL_DEV_SECRETS = {
+  AGENT_SECRET: "agent-dev-secret",
+  PROJECTOR_SECRET: "projector-dev-secret",
+  ADMIN_SECRET: "admin-dev-secret",
+} as const satisfies Record<keyof Pick<Env, "AGENT_SECRET" | "PROJECTOR_SECRET" | "ADMIN_SECRET">, string>;
 
 export default class Lobby implements Party.Server {
   readonly options = { hibernate: false };
@@ -130,29 +140,31 @@ export default class Lobby implements Party.Server {
     const url = new URL(ctx.request.url);
     const role = this.parseRole(url.searchParams.get("as"));
     const sessionId = this.cleanSession(url.searchParams.get("sessionId"));
+    const localDev = this.isLocalDevUrl(url);
 
-    if (!this.authorize(role, url.searchParams.get("secret"))) {
-      conn.close(1008, "bad secret");
+    if (!this.authorize(role, url.searchParams.get("secret"), localDev)) {
+      conn.setState({ role: "player", localDev });
+      this.close(conn, 1008, "bad secret");
       return;
     }
 
     if (role === "projector" || role === "admin") {
-      conn.setState({ role });
+      conn.setState({ role, localDev });
       this.send(conn, { t: "init", snapshot: this.snapshotFor(null, role) });
       return;
     }
 
     const player = this.assignPlayer(role, sessionId);
     if (!player) {
-      conn.setState({ role });
+      conn.setState({ role, localDev });
       this.send(conn, { t: "error", code: "room_full", message: "room full" });
-      conn.close(1008, "room full");
+      this.close(conn, 1008, "room full");
       return;
     }
 
     player.connected = true;
     player.lastSeen = Date.now();
-    conn.setState({ role, playerId: player.id, sessionId: player.sessionId });
+    conn.setState({ role, playerId: player.id, sessionId: player.sessionId, localDev });
     this.send(conn, { t: "init", snapshot: this.snapshotFor(player.id, role) });
     this.broadcastRoster();
   }
@@ -189,10 +201,10 @@ export default class Lobby implements Party.Server {
         this.handleAdmin(conn, role, parsed.secret, parsed.op);
         return;
       case "agentReady":
-        this.handleAgentReady(conn, role, parsed.ready, parsed.model);
+        this.handleAgentReady(conn, role, player, parsed.ready, parsed.model);
         return;
       case "agentTrace":
-        this.handleAgentTrace(conn, role, parsed.entry);
+        this.handleAgentTrace(conn, role, player, parsed.entry);
         return;
     }
   }
@@ -204,18 +216,30 @@ export default class Lobby implements Party.Server {
     if (!player) return;
     player.connected = false;
     player.lastSeen = Date.now();
+    if (player.isAi) {
+      this.agentReady = false;
+      this.agentModel = undefined;
+    }
     this.scheduleReconnectCleanup(player.id, player.sessionId);
     this.broadcastRoster();
+    this.broadcastSnapshot();
   }
 
   private handleMove(conn: Party.Connection<ConnState>, player: InternalPlayer | undefined, msg: { x: number; y: number; facing: Facing }): void {
     if (!player || player.isGhost) return;
+    if (this.phase === "reveal" || this.phase === "outro") {
+      this.sendError(conn, "phase_mismatch", "movement locked");
+      return;
+    }
     const now = Date.now();
     if (now - player.lastMoveAt < MOVE_MIN_INTERVAL_MS) return;
+    const x = Number(msg.x);
+    const y = Number(msg.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
     if (!this.isFacing(msg.facing)) return;
     player.lastMoveAt = now;
-    player.x = this.clamp(Number(msg.x), 24, MAP_WIDTH - 48);
-    player.y = this.clamp(Number(msg.y), 48, MAP_HEIGHT - 56);
+    player.x = this.clamp(x, 24, MAP_WIDTH - 48);
+    player.y = this.clamp(y, 48, MAP_HEIGHT - 56);
     player.facing = msg.facing;
     player.moving = true;
     this.broadcastMsg({ t: "pos", id: player.id, x: player.x, y: player.y, facing: player.facing, moving: true });
@@ -230,6 +254,11 @@ export default class Lobby implements Party.Server {
 
   private handleChat(conn: Party.Connection<ConnState>, player: InternalPlayer | undefined, rawText: string): void {
     if (!player || player.isGhost || player.muted) return;
+    if (this.phase === "reveal" || this.phase === "outro") {
+      this.sendError(conn, "phase_mismatch", "chat locked");
+      return;
+    }
+    if (typeof rawText !== "string") return;
     const now = Date.now();
     if (now - player.lastChatAt < CHAT_MIN_INTERVAL_MS) {
       this.sendError(conn, "rate_limited", "slow down");
@@ -250,7 +279,15 @@ export default class Lobby implements Party.Server {
   }
 
   private handleVote(conn: Party.Connection<ConnState>, player: InternalPlayer | undefined, targetId: string): void {
-    if (!player || player.isGhost) return;
+    if (!player) return;
+    if (player.isGhost) {
+      this.sendError(conn, "vote_locked", "ghosts cannot vote");
+      return;
+    }
+    if (typeof targetId !== "string") {
+      this.sendError(conn, "invalid_target", "invalid vote target");
+      return;
+    }
     const now = Date.now();
     if (this.phase !== "active" || now < this.voteLockoutEndsAt || player.hasVoted) {
       this.sendError(conn, "vote_locked", "vote locked");
@@ -295,34 +332,60 @@ export default class Lobby implements Party.Server {
   }
 
   private handleAdmin(conn: Party.Connection<ConnState>, role: Role, secret: string, op: string): void {
-    if (role !== "admin" && !this.authorize("admin", secret)) {
+    if (role !== "admin" && !this.authorize("admin", secret, conn.state?.localDev === true)) {
       this.sendError(conn, "bad_secret", "bad admin secret");
       return;
     }
 
-    if (op === "start") this.tryStartRound(conn);
-    if (op === "force_reveal") this.startReveal("host", null, null);
-    if (op === "enable_fallback") {
-      this.fallbackAgentEnabled = true;
-      this.broadcastSnapshot();
+    if (!this.isAdminOp(op)) {
+      this.sendError(conn, "phase_mismatch", "unknown admin op");
+      return;
     }
-    if (op === "soft_reset") this.resetToLobby(false);
-    if (op === "hard_reset") this.resetToLobby(true);
+
+    switch (op) {
+      case "start":
+        this.tryStartRound(conn);
+        return;
+      case "force_reveal":
+        this.forceReveal(conn);
+        return;
+      case "enable_fallback":
+        this.fallbackAgentEnabled = true;
+        this.broadcastSnapshot();
+        return;
+      case "soft_reset":
+        this.resetToLobby(false);
+        return;
+      case "hard_reset":
+        this.resetToLobby(true);
+        return;
+    }
   }
 
-  private handleAgentReady(conn: Party.Connection<ConnState>, role: Role, ready: boolean, model?: string): void {
-    if (role !== "agentPlayer") {
+  private handleAgentReady(
+    conn: Party.Connection<ConnState>,
+    role: Role,
+    player: InternalPlayer | undefined,
+    ready: boolean,
+    model?: string,
+  ): void {
+    if (role !== "agentPlayer" || !player?.isAi) {
       this.sendError(conn, "bad_secret", "agent only");
       return;
     }
+    this.aiSlotId = player.id;
     this.agentReady = Boolean(ready);
     this.agentModel = model ? String(model).slice(0, 80) : undefined;
     this.broadcastSnapshot();
   }
 
-  private handleAgentTrace(conn: Party.Connection<ConnState>, role: Role, entry: TraceEntryInput): void {
-    if (role !== "agentPlayer") {
+  private handleAgentTrace(conn: Party.Connection<ConnState>, role: Role, player: InternalPlayer | undefined, entry: TraceEntryInput): void {
+    if (role !== "agentPlayer" || !player?.isAi) {
       this.sendError(conn, "bad_secret", "agent only");
+      return;
+    }
+    if (!this.isTraceEntryInput(entry)) {
+      this.sendError(conn, "phase_mismatch", "bad trace entry");
       return;
     }
     if (!this.allowTraceNow()) return;
@@ -351,6 +414,14 @@ export default class Lobby implements Party.Server {
       return;
     }
     this.startRollin();
+  }
+
+  private forceReveal(conn: Party.Connection<ConnState>): void {
+    if (this.phase === "lobby" || this.phase === "outro" || !this.aiSlotId) {
+      this.sendError(conn, "phase_mismatch", "no active round to reveal");
+      return;
+    }
+    this.startReveal("host", null, null);
   }
 
   private startRollin(): void {
@@ -399,17 +470,18 @@ export default class Lobby implements Party.Server {
       chatLog: this.recentActiveChat(),
       trace: [...this.traceBuffer],
     };
-    this.broadcastMsg(reveal);
+    this.broadcastReveal(reveal);
     this.setTimer(() => this.startOutro(), REVEAL_MS);
   }
 
   private startOutro(): void {
-    this.setPhase("outro", Date.now() + 5_000, 0);
-    this.setTimer(() => this.resetToLobby(false), 5_000);
+    this.setPhase("outro", Date.now() + OUTRO_MS, 0);
+    this.setTimer(() => this.resetToLobby(false), OUTRO_MS);
   }
 
   private resetToLobby(clearPlayers: boolean): void {
     this.clearTimer();
+    if (clearPlayers) this.closePlayerConnections("hard reset");
     this.phase = "lobby";
     this.phaseEndsAt = 0;
     this.voteLockoutEndsAt = 0;
@@ -451,7 +523,17 @@ export default class Lobby implements Party.Server {
     const existingId = this.sessionToPlayer.get(sessionId);
     if (existingId) {
       const existing = this.players.get(existingId);
-      if (existing) return existing;
+      if (existing) return this.roleOwnsPlayer(role, existing) ? existing : null;
+      this.sessionToPlayer.delete(sessionId);
+    }
+
+    if (role === "agentPlayer" && this.aiSlotId) {
+      const existingAi = this.players.get(this.aiSlotId);
+      if (existingAi) {
+        this.rebindSession(existingAi, sessionId);
+        return existingAi;
+      }
+      this.aiSlotId = null;
     }
 
     if (role === "player" && this.humanPlayers().length >= MAX_HUMANS_LOBBY) return null;
@@ -487,6 +569,17 @@ export default class Lobby implements Party.Server {
     this.sessionToPlayer.set(sessionId, id);
     if (player.isAi) this.aiSlotId = id;
     return player;
+  }
+
+  private roleOwnsPlayer(role: Role, player: InternalPlayer): boolean {
+    return role === "agentPlayer" ? player.isAi : !player.isAi;
+  }
+
+  private rebindSession(player: InternalPlayer, sessionId: string): void {
+    if (player.sessionId === sessionId) return;
+    this.sessionToPlayer.delete(player.sessionId);
+    player.sessionId = sessionId;
+    this.sessionToPlayer.set(sessionId, player.id);
   }
 
   private createFallbackAi(): void {
@@ -553,11 +646,18 @@ export default class Lobby implements Party.Server {
     this.broadcastMsg({ t: "voteCount", tally: {}, votesCast: this.votesCast() });
   }
 
+  private broadcastReveal(reveal: Extract<ServerMsg, { t: "reveal" }>): void {
+    const payload = JSON.stringify(reveal);
+    for (const conn of this.room.getConnections<ConnState>()) {
+      this.sendRaw(conn, payload);
+    }
+  }
+
   private sendTrace(entry: TraceEntry): void {
     const msg = JSON.stringify({ t: "trace", entry } satisfies ServerMsg);
     for (const conn of this.room.getConnections<ConnState>()) {
       const role = conn.state?.role;
-      if (role === "projector" || role === "admin") conn.send(msg);
+      if (role === "projector" || role === "admin") this.sendRaw(conn, msg);
     }
   }
 
@@ -661,16 +761,33 @@ export default class Lobby implements Party.Server {
     return "player";
   }
 
-  private authorize(role: Role, secret: string | null): boolean {
+  private authorize(role: Role, secret: string | null, localDev: boolean): boolean {
     if (role === "player") return true;
-    const env = this.roomEnv();
-    const expected = role === "agentPlayer" ? env.AGENT_SECRET : role === "projector" ? env.PROJECTOR_SECRET : env.ADMIN_SECRET;
-    return Boolean(expected) && secret === expected;
+    const expected = this.expectedSecret(role, localDev);
+    return Boolean(expected) && Boolean(secret) && secret === expected;
+  }
+
+  private expectedSecret(role: Role, localDev: boolean): string | null {
+    if (role === "player") return null;
+    const key = role === "agentPlayer" ? "AGENT_SECRET" : role === "projector" ? "PROJECTOR_SECRET" : "ADMIN_SECRET";
+    const configured = this.cleanSecret(this.roomEnv()[key]);
+    if (configured) return configured;
+    return localDev ? LOCAL_DEV_SECRETS[key] : null;
+  }
+
+  private cleanSecret(value: string | undefined): string | null {
+    if (typeof value !== "string") return null;
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
   }
 
   private cleanSession(value: string | null): string | null {
     if (!value) return null;
     return value.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 80) || null;
+  }
+
+  private isLocalDevUrl(url: URL): boolean {
+    return url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "0.0.0.0" || url.hostname === "::1";
   }
 
   private sanitizeChat(rawText: string): string {
@@ -698,6 +815,30 @@ export default class Lobby implements Party.Server {
 
   private isFacing(value: string): value is Facing {
     return value === "up" || value === "down" || value === "left" || value === "right";
+  }
+
+  private isAdminOp(value: unknown): value is AdminOp {
+    return (
+      value === "start" ||
+      value === "force_reveal" ||
+      value === "soft_reset" ||
+      value === "hard_reset" ||
+      value === "enable_fallback"
+    );
+  }
+
+  private isTraceEntryInput(value: unknown): value is TraceEntryInput {
+    if (!value || typeof value !== "object") return false;
+    const entry = value as Record<string, unknown>;
+    return this.isTraceKind(entry.kind) && this.isTraceSource(entry.source) && typeof entry.text === "string";
+  }
+
+  private isTraceKind(value: unknown): value is TraceKind {
+    return value === "reasoning" || value === "agentMessage" || value === "tool" || value === "meta";
+  }
+
+  private isTraceSource(value: unknown): value is TraceSource {
+    return value === "appserver_raw" || value === "appserver_summary" || value === "responses_summary" || value === "bridge";
   }
 
   private minPlayers(): number {
@@ -730,9 +871,33 @@ export default class Lobby implements Party.Server {
     if (target.length > limit) target.splice(0, target.length - limit);
   }
 
-  private send(conn: Party.Connection, msg: ServerMsg): void {
+  private send(conn: Party.Connection<ConnState>, msg: ServerMsg): void {
+    this.sendRaw(conn, JSON.stringify(msg));
+  }
+
+  private sendRaw(conn: Party.Connection<ConnState>, payload: string): void {
     if (conn.readyState !== WebSocket.OPEN) return;
-    conn.send(JSON.stringify(msg));
+    try {
+      conn.send(payload);
+    } catch {
+      // Closed PartyKit sockets can race with broadcasts during reconnect/reset.
+    }
+  }
+
+  private close(conn: Party.Connection<ConnState>, code: number, reason: string): void {
+    if (conn.readyState === WebSocket.CLOSING || conn.readyState === WebSocket.CLOSED) return;
+    try {
+      conn.close(code, reason.slice(0, 120));
+    } catch {
+      // A close racing another close is harmless.
+    }
+  }
+
+  private closePlayerConnections(reason: string): void {
+    for (const conn of this.room.getConnections<ConnState>()) {
+      const role = conn.state?.role;
+      if (role === "player" || role === "agentPlayer") this.close(conn, 1012, reason);
+    }
   }
 
   private roomEnv(): Env {
@@ -740,10 +905,13 @@ export default class Lobby implements Party.Server {
   }
 
   private broadcastMsg(msg: ServerMsg): void {
-    this.room.broadcast(JSON.stringify(msg));
+    const payload = JSON.stringify(msg);
+    for (const conn of this.room.getConnections<ConnState>()) {
+      this.sendRaw(conn, payload);
+    }
   }
 
-  private sendError(conn: Party.Connection, code: ErrorCode, message: string): void {
+  private sendError(conn: Party.Connection<ConnState>, code: ErrorCode, message: string): void {
     this.send(conn, { t: "error", code, message });
   }
 }
