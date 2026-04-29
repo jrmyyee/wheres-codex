@@ -75,7 +75,7 @@ If you believe one of the read-only files needs updating, write a "Proposed chan
 ## Non-goals (do not implement)
 
 - Authentication, accounts, login, or persistent server-side user profiles. Anonymous `localStorage` `sessionId` reconnect tokens are allowed and required by `SPEC.md`.
-- Tests beyond a single end-to-end smoke verification (one Playwright script that loads two browser contexts and verifies move + chat).
+- Tests beyond a single lightweight smoke verification. Prefer build/typecheck plus timeout-wrapped server probes and real-phone manual smoke. Do not add Playwright unless the user explicitly approves the dependency.
 - CI / GitHub Actions / Dockerfiles.
 - Error UI, retry banners, exponential backoff, observability dashboards.
 - README rewrites, CHANGELOG, additional `*.md` files.
