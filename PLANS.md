@@ -106,6 +106,10 @@ PartyKit backend is deployed at `https://wheres-codex.jrmyyee.partykit.dev` and 
 
 Generated `AGENT_SECRET`, `PROJECTOR_SECRET`, and `ADMIN_SECRET` into `.env` without printing values. Redeployed PartyKit with runtime vars (`--with-vars --with-env`) after discovering `--with-env` alone only provided build-time constants. Public E2E now passes with four human sockets plus App Server agent: Codex appears as numbered player, trace reaches projector/admin, wrong vote ghosts the voter, and correct vote reveals. Ran three public smoke rounds without server crash.
 
+### t+02:03 — 2026-04-29T05:41:09Z — Demo room switched to SYD-CODEX; agent keepalive fixed
+
+Switched the live demo room from `SGN-LOCAL` to `SYD-CODEX`. Found that the agent could connect and send `agentReady=true`, then exit while idle in lobby; added a 15s `hello` heartbeat to keep the Node event loop and room snapshot alive. Detached non-TTY launches still exited, so the demo agent is currently running in a detached `screen` session named `wheres-codex-agent`.
+
 ---
 
 ## Validation
@@ -593,6 +597,25 @@ Deployed ./src/server.ts to https://wheres-codex.jrmyyee.partykit.dev
   "aiIdMatches": true,
   "totalEvents": 288
 }
+```
+
+### Demo agent readiness — 2026-04-29T05:41:09Z
+
+`source ~/.nvm/nvm.sh && nvm use >/dev/null && pnpm -F agent typecheck`
+```
+> agent@0.1.0 typecheck /Users/jrmyyee/Documents/Projects/codex_hack/agent
+> tsc --noEmit
+```
+
+`screen -dmS wheres-codex-agent ... ROOM=SYD-CODEX ./node_modules/.bin/tsx src/index.ts`
+```
+There is a screen on:
+  68057.wheres-codex-agent (Detached)
+```
+
+`curl -s --max-time 10 https://wheres-codex.jrmyyee.partykit.dev/parties/main/SYD-CODEX/health`
+```
+{"ok":true,"room":"SYD-CODEX","phase":"lobby","players":1,"agentReady":true,"fallbackAgentEnabled":false}
 ```
 
 `PUBLIC_E2E round 2 — deployed PartyKit + local App Server agent + four human sockets`
