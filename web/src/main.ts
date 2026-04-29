@@ -335,7 +335,7 @@ function adminPanel(): HTMLElement {
     ["start", "start"],
     ["fallback", "enable_fallback"],
     ["reveal", "force_reveal"],
-    ["reset", "soft_reset"],
+    ["clear", "hard_reset"],
   ] as const) {
     const button = document.createElement("button");
     button.type = "button";
