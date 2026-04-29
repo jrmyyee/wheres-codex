@@ -103,3 +103,132 @@
     opacity: 1;
   }
 }
+
+/* Visual uplift — clearer numbered sprites and speech. */
+.player {
+  width: 50px;
+  height: 66px;
+  transition: transform 135ms linear;
+}
+
+.player.self::after {
+  left: 3px;
+  top: 20px;
+  width: 44px;
+  height: 36px;
+  border: 2px solid var(--accent);
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px rgba(6, 11, 16, 0.75), 0 0 14px rgba(245, 200, 75, 0.62);
+}
+
+.body {
+  left: 13px;
+  top: 26px;
+  width: 24px;
+  height: 22px;
+  border-radius: 6px 6px 4px 4px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.18), transparent 34%),
+    hsl(var(--hue), 62%, 48%);
+  box-shadow:
+    0 -13px 0 #d79b69,
+    0 -17px 0 -5px #22140f,
+    -7px -10px 0 -4px #22140f,
+    7px -10px 0 -4px #22140f,
+    -9px 7px 0 -1px #101820,
+    9px 7px 0 -1px #101820,
+    -8px 21px 0 -1px #273946,
+    8px 21px 0 -1px #273946,
+    0 27px 0 -6px rgba(0, 0, 0, 0.34);
+}
+
+.player.moving .body {
+  animation: bob 0.24s steps(2) infinite;
+}
+
+.player.up .body {
+  box-shadow:
+    0 -13px 0 #bd835b,
+    0 -17px 0 -5px #22140f,
+    -7px -10px 0 -4px #22140f,
+    7px -10px 0 -4px #22140f,
+    -9px 7px 0 -1px #101820,
+    9px 7px 0 -1px #101820,
+    -8px 21px 0 -1px #273946,
+    8px 21px 0 -1px #273946,
+    0 27px 0 -6px rgba(0, 0, 0, 0.34);
+}
+
+.player.ghost {
+  opacity: 0.46;
+}
+
+.player.ghost .body {
+  background: #8e9aa2;
+  filter: saturate(0.35);
+}
+
+.player.ghost .num {
+  border-color: rgba(240, 90, 79, 0.72);
+  color: #ffb5ad;
+}
+
+.num {
+  top: 0;
+  min-width: 31px;
+  padding: 5px 5px 4px;
+  border: 2px solid #0b1115;
+  border-radius: 6px;
+  background:
+    linear-gradient(180deg, hsl(var(--hue), 64%, 54%), hsl(var(--hue), 58%, 38%));
+  color: #fff;
+  font-size: 9px;
+  text-align: center;
+  text-shadow: 1px 1px 0 #000;
+  box-shadow: 0 2px 0 #05080a, 0 0 0 1px rgba(255, 255, 255, 0.08) inset;
+}
+
+.num::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -7px;
+  width: 9px;
+  height: 9px;
+  background: inherit;
+  border-right: 2px solid #0b1115;
+  border-bottom: 2px solid #0b1115;
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.bubble {
+  bottom: 58px;
+  min-width: 54px;
+  max-width: 168px;
+  border-radius: 7px;
+  background: #fff7e7;
+  color: #0d1419;
+  box-shadow: 3px 4px 0 rgba(6, 11, 16, 0.36);
+}
+
+.bubble::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -8px;
+  width: 12px;
+  height: 12px;
+  background: #fff7e7;
+  border-right: 2px solid var(--line);
+  border-bottom: 2px solid var(--line);
+  transform: translateX(-50%) rotate(45deg);
+}
+
+@keyframes bob {
+  from {
+    top: 26px;
+  }
+  to {
+    top: 23px;
+  }
+}

@@ -23,7 +23,7 @@ const appRoot = document.querySelector<HTMLDivElement>("#app") ?? missingRoot();
 
 const params = new URLSearchParams(window.location.search);
 const mode = routeMode();
-const room = (params.get("room") || "SGN-LOCAL").slice(0, 32);
+const room = (params.get("room") || "SYD-CODEX").slice(0, 32);
 const secret = params.get("secret") || "";
 const sessionId = mode === "player" ? getSessionId() : undefined;
 const bubbles = new Map<string, { text: string; until: number }>();
@@ -235,7 +235,7 @@ function playerView(): HTMLElement {
 function projectorView(): HTMLElement {
   const screen = div("screen projector-screen");
   const side = div("side");
-  side.append(roomPanel(), tracePanel());
+  side.append(roomPanel(), tracePanel(), ghostPanel());
   screen.append(mapShell(), side, revealOverlay());
   return screen;
 }
@@ -271,6 +271,13 @@ function mapShell(): HTMLElement {
     div("wall north"),
     div("wall west"),
     div("wall east"),
+    div("floor-zone welcome-mat"),
+    div("floor-zone lounge-rug"),
+    div("furniture bookcase"),
+    div("furniture kitchen"),
+    div("furniture watercooler"),
+    div("furniture server-rack"),
+    div("furniture corkboard"),
     div("furniture whiteboard"),
     div("furniture window"),
     div("furniture coffee"),
@@ -323,6 +330,19 @@ function roomPanel(): HTMLElement {
 function tracePanel(): HTMLElement {
   const panel = div("trace-panel");
   panel.textContent = "capturing trace...";
+  return panel;
+}
+
+function ghostPanel(): HTMLElement {
+  const panel = div("panel ghost-panel");
+  const icon = div("ghost-icon");
+  const copy = div("ghost-copy");
+  const title = div("panel-title");
+  title.textContent = "ghost mode";
+  const body = div("subtle");
+  body.textContent = "wrong voters watch the trace";
+  copy.append(title, body);
+  panel.append(icon, copy);
   return panel;
 }
 

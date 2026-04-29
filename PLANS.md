@@ -114,6 +114,25 @@ Switched the live demo room from `SGN-LOCAL` to `SYD-CODEX`. Found that the agen
 
 Patched round-start feel and voting: roll-in is 2.5s, demo vote lockout is 2s, normal vote lockout is 8s, voting is one tap instead of tap-again confirmation, full UI rerender cadence is reduced, PartyKit no longer sends redundant snapshots on every movement/phase tick. Patched Codex behavior so walk decisions move directly and prompts include nearby/moving-player context.
 
+### 2026-04-29T23:43:17Z — Visual uplift roadmap scoped
+
+Reviewed the generated visual concept plus current `web/src`, `packages/protocol`, `party`, and `agent` implementation with two parallel explorer agents. Roadmap is CSS/static-DOM first: keep PartyKit/protocol/agent stable, make the existing office read like a polished pixel control-room dashboard, and only add optional protocol state if reveal reconnect/staging becomes necessary.
+
+Implementation lanes:
+- Web visual shell: `web/src/theme.css` owns the dark chrome, header, panel style, QR card, chat/vote panels, reveal overlay, and responsive projector/admin layouts.
+- Office density: `web/src/map.css` plus limited `mapShell()` static class additions add richer wall/floor treatments, rugs/zones, desks, shelves, fridge/coffee, whiteboard, and shadows without changing `MAP_WIDTH`/`MAP_HEIGHT`.
+- Avatar/game feel: `web/src/avatar.css` improves numbered tags, sprite silhouette, speech bubbles, self ring, ghost styling, and movement readability.
+- Reveal/trace polish: existing `reveal` payload and `tracePreview` support a stronger split-screen reveal, trace ticker, AI highlight, and final outcome copy without exposing the AI before reveal.
+- Validation: after each slice run `pnpm -F web build`; for deployable uplift, also run public HTTP/WebSocket smoke before replacing the demo URL.
+
+### 2026-04-29T23:45:07Z — Visual uplift implementation started
+
+Started the web-owned visual implementation. Scope is limited to `web/src/main.ts`, `web/src/theme.css`, `web/src/map.css`, and `web/src/avatar.css`; protocol, PartyKit, agent, and secrets remain unchanged unless validation exposes a blocker. Spawned one read-only performance/mobile explorer while the coordinator edits.
+
+### 2026-04-29T23:56:15Z — Visual uplift deployed
+
+Implemented the visual uplift and deployed it to the existing Vercel production alias. The public URL now defaults to `SYD-CODEX` when no `room` query param is present, the office has denser pixel-art scenery, the UI uses dark control-room chrome, projector gets a ghost-mode card, and avatars/vote/chat/reveal surfaces have stronger styling. PartyKit, protocol, agent, and secrets were not changed.
+
 ---
 
 ## Validation
@@ -709,6 +728,53 @@ dist/assets/index-DeryYQ3d.js   62.38 kB │ gzip: 21.70 kB
 }
 ```
 
+### Visual uplift validation — 2026-04-29T23:56:15Z
+
+`source ~/.nvm/nvm.sh && nvm use >/dev/null && pnpm -F web typecheck`
+```
+> web@0.1.0 typecheck /Users/jrmyyee/Documents/Projects/codex_hack/web
+> tsc --noEmit
+```
+
+`source ~/.nvm/nvm.sh && nvm use >/dev/null && pnpm -F web build`
+```
+vite v6.4.2 building for production...
+✓ 62 modules transformed.
+dist/index.html                  0.71 kB │ gzip:  0.38 kB
+dist/assets/index-DYQs-jMH.css  27.39 kB │ gzip:  6.97 kB
+dist/assets/index-DAnCpnuO.js   63.43 kB │ gzip: 22.04 kB
+✓ built in 148ms
+```
+
+`bounded Vite route smoke on 127.0.0.1:5177`
+```
+/ HTTP 200 bytes=670
+/projector HTTP 200 bytes=670
+/admin HTTP 200 bytes=670
+```
+
+`headless Chrome mobile screenshot smoke`
+```
+/tmp/wheres-codex-screens/player2.png 104K
+```
+
+`CI=1 vercel deploy --prod --yes -b VITE_PARTY_HOST=https://wheres-codex.jrmyyee.partykit.dev`
+```
+Production: https://codexhack-giinpvp0e-jezzayeespam-8464s-projects.vercel.app [17s]
+Aliased: https://codexhack.vercel.app [17s]
+```
+
+`/usr/bin/curl -L -sS --max-time 20 -o /tmp/wheres-codex-public.html -w 'status=%{http_code} bytes=%{size_download}\n' 'https://codexhack.vercel.app/?room=SYD-CODEX'`
+```
+status=200 bytes=712
+```
+
+`node --input-type=module -e '<public PartyKit player websocket smoke>'`
+```
+{"stage":"open","room":"VISUAL-SMOKE-1777506944274"}
+{"ok":true,"stage":"message","room":"VISUAL-SMOKE-1777506944274","first":"{\"t\":\"init\",\"snapshot\":{\"you\":\"p_17c0cb71e0\",\"roundId\":\"r_mokpqolw_k7ghu\",\"roomCode\":\"VISUAL-SMOKE-1777506944274\"..."}
+```
+
 ---
 
 ## Surprises & Discoveries
@@ -726,6 +792,9 @@ dist/assets/index-DeryYQ3d.js   62.38 kB │ gzip: 21.70 kB
 - 2026-04-29T05:09:54Z — Vercel CLI created local `.vercel` metadata and added `.vercel` to `.gitignore`; `.vercel` is ignored and not committed. `.gitignore` is currently modified only by that generated ignore entry.
 - 2026-04-29T05:09:54Z — `.env` now has `OPENAI_API_KEY=present`, but the required privileged-role secrets are missing. Public PartyKit deploy is reachable, but public agent/admin/projector E2E is blocked until `AGENT_SECRET`, `PROJECTOR_SECRET`, and `ADMIN_SECRET` are added and PartyKit is redeployed.
 - 2026-04-29T05:19:43Z — PartyKit `deploy --with-env` does not populate runtime `this.room.env`; it only defines build-time constants. Runtime secret validation required redeploying with `--with-vars --with-env`.
+- 2026-04-29T23:43:17Z — Subagent thread cap prevented launching a third visual/performance explorer; two explorers completed and the coordinator covered performance/deploy risk locally.
+- 2026-04-29T23:43:17Z — Generated concept image filename differed from the predicted descriptive path; actual raster was under `/Users/jrmyyee/.codex/generated_images/.../ig_0ef13c52b026e4da0169f29669de70819183bc859a9bfc3b1c.png`.
+- 2026-04-29T23:56:15Z — Headless Chrome produced mobile player screenshots reliably, but the larger projector screenshot command did not finish before the bounded alarm. Local route smoke and public HTTP/WebSocket smokes still passed.
 
 ---
 
@@ -735,6 +804,9 @@ dist/assets/index-DeryYQ3d.js   62.38 kB │ gzip: 21.70 kB
 
 - Saigon Rush implementation is a read-only reference — it already solved role routes, QR/lobby flow, session WebSocket wrappers, buffer caps, and static-web/backend deploy split for a real hackathon game.
 - App Server driver stays primary for the build — H0 produced a real dynamic `say` tool call and traceable App Server notifications with `gpt-5.3-codex`.
+- Visual uplift should avoid protocol/server churn unless it directly improves demo resilience — the current state model already supports ghosts, reveal, trace, QR, vote grid, and projector/admin roles.
+- Visual uplift should be implemented as one web-owned slice first — mostly `theme.css`, `map.css`, `avatar.css`, and small static scenery additions in `main.ts`, followed by build and public smoke validation.
+- Default room changed from `SGN-LOCAL` to `SYD-CODEX` for no-query web loads — it matches the current public demo room and keeps the root URL demo-ready.
 
 ---
 
