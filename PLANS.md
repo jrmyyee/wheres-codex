@@ -133,6 +133,14 @@ Started the web-owned visual implementation. Scope is limited to `web/src/main.t
 
 Implemented the visual uplift and deployed it to the existing Vercel production alias. The public URL now defaults to `SYD-CODEX` when no `room` query param is present, the office has denser pixel-art scenery, the UI uses dark control-room chrome, projector gets a ghost-mode card, and avatars/vote/chat/reveal surfaces have stronger styling. PartyKit, protocol, agent, and secrets were not changed.
 
+### 2026-04-30T00:02:46Z — Projector-product implementation started
+
+User clarified the target is closer product parity with the generated image, including interface composition and sprite/visual treatment. Started a second web-only pass focused on making `/projector` the product-shot dashboard: top chrome, large map, right QR/trace/status rail, bottom read-only chat/vote modules, and richer CSS pixel sprites. Protocol, PartyKit, agent, and secrets remain unchanged.
+
+### 2026-04-30T00:13:06Z — Projector dashboard visual pass deployed
+
+Reworked `/projector` and `/admin` into the generated-image dashboard composition: top logo/status chrome, large office stage, right QR/trace/ghost rail, and bottom chat/vote modules. Added sprite-index hair/silhouette variation so numbered players read more like distinct characters. Kept `/` as the phone controller route and did not change protocol, PartyKit, agent, or secrets.
+
 ---
 
 ## Validation
@@ -775,6 +783,53 @@ status=200 bytes=712
 {"ok":true,"stage":"message","room":"VISUAL-SMOKE-1777506944274","first":"{\"t\":\"init\",\"snapshot\":{\"you\":\"p_17c0cb71e0\",\"roundId\":\"r_mokpqolw_k7ghu\",\"roomCode\":\"VISUAL-SMOKE-1777506944274\"..."}
 ```
 
+### Projector dashboard validation — 2026-04-30T00:13:06Z
+
+`source ~/.nvm/nvm.sh && nvm use >/dev/null && pnpm -F web typecheck`
+```
+> web@0.1.0 typecheck /Users/jrmyyee/Documents/Projects/codex_hack/web
+> tsc --noEmit
+```
+
+`source ~/.nvm/nvm.sh && nvm use >/dev/null && pnpm -F web build`
+```
+vite v6.4.2 building for production...
+✓ 62 modules transformed.
+dist/index.html                  0.71 kB │ gzip:  0.38 kB
+dist/assets/index-Bmp2eyXs.css  32.67 kB │ gzip:  7.92 kB
+dist/assets/index-CCG5p7hn.js   64.93 kB │ gzip: 22.46 kB
+✓ built in 148ms
+```
+
+`bounded Vite route smoke on 127.0.0.1:5183`
+```
+/ HTTP 200 bytes=670
+/projector HTTP 200 bytes=670
+/admin HTTP 200 bytes=670
+```
+
+`headless Chrome projector screenshot smoke`
+```
+/tmp/wheres-codex-screens/dashboard-projector2.png 209K
+```
+
+`CI=1 vercel deploy --prod --yes -b VITE_PARTY_HOST=https://wheres-codex.jrmyyee.partykit.dev`
+```
+Production: https://codexhack-fljq30h6b-jezzayeespam-8464s-projects.vercel.app [19s]
+Aliased: https://codexhack.vercel.app [24s]
+```
+
+`/usr/bin/curl -L -sS --max-time 20 -o /tmp/wheres-codex-public-dashboard.html -w 'status=%{http_code} bytes=%{size_download}\n' 'https://codexhack.vercel.app/projector?room=SYD-CODEX'`
+```
+status=200 bytes=712
+```
+
+`node --input-type=module -e '<public PartyKit player websocket smoke>'`
+```
+{"stage":"open","room":"DASH-SMOKE-1777507976961"}
+{"ok":true,"stage":"message","room":"DASH-SMOKE-1777507976961","first":"{\"t\":\"init\",\"snapshot\":{\"you\":\"p_e657b722d4\",\"roundId\":\"r_mokqctcn_oxqq3\",\"roomCode\":\"DASH-SMOKE-1777507976961\"..."}
+```
+
 ---
 
 ## Surprises & Discoveries
@@ -795,6 +850,7 @@ status=200 bytes=712
 - 2026-04-29T23:43:17Z — Subagent thread cap prevented launching a third visual/performance explorer; two explorers completed and the coordinator covered performance/deploy risk locally.
 - 2026-04-29T23:43:17Z — Generated concept image filename differed from the predicted descriptive path; actual raster was under `/Users/jrmyyee/.codex/generated_images/.../ig_0ef13c52b026e4da0169f29669de70819183bc859a9bfc3b1c.png`.
 - 2026-04-29T23:56:15Z — Headless Chrome produced mobile player screenshots reliably, but the larger projector screenshot command did not finish before the bounded alarm. Local route smoke and public HTTP/WebSocket smokes still passed.
+- 2026-04-30T00:13:06Z — Local projector screenshots use the default local PartySocket host unless Vite is launched with `VITE_PARTY_HOST`; this means screenshot status can show `connecting` even though the public deploy smoke is green.
 
 ---
 
@@ -807,6 +863,7 @@ status=200 bytes=712
 - Visual uplift should avoid protocol/server churn unless it directly improves demo resilience — the current state model already supports ghosts, reveal, trace, QR, vote grid, and projector/admin roles.
 - Visual uplift should be implemented as one web-owned slice first — mostly `theme.css`, `map.css`, `avatar.css`, and small static scenery additions in `main.ts`, followed by build and public smoke validation.
 - Default room changed from `SGN-LOCAL` to `SYD-CODEX` for no-query web loads — it matches the current public demo room and keeps the root URL demo-ready.
+- `/projector` is now the product-shot surface, while `/` remains phone-controller-first — this matches the generated image without making the mobile view too dense.
 
 ---
 

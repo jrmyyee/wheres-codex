@@ -234,18 +234,32 @@ function playerView(): HTMLElement {
 
 function projectorView(): HTMLElement {
   const screen = div("screen projector-screen");
-  const side = div("side");
+  const stage = div("dashboard-stage");
+  const side = div("dashboard-side");
+  const bottom = div("dashboard-bottom");
   side.append(roomPanel(), tracePanel(), ghostPanel());
-  screen.append(mapShell(), side, revealOverlay());
+  bottom.append(chatPanel("readonly"), votePanel());
+  stage.append(mapShell(), bottom);
+  screen.append(dashboardHeader(), stage, side, revealOverlay());
   return screen;
 }
 
 function adminView(): HTMLElement {
   const screen = div("screen admin-screen");
-  const side = div("side");
-  side.append(roomPanel(), adminPanel(), tracePanel());
-  screen.append(mapShell(), side, revealOverlay());
+  const stage = div("dashboard-stage");
+  const side = div("dashboard-side");
+  const bottom = div("dashboard-bottom");
+  side.append(roomPanel(), adminPanel(), tracePanel(), ghostPanel());
+  bottom.append(chatPanel("readonly"), votePanel());
+  stage.append(mapShell(), bottom);
+  screen.append(dashboardHeader(), stage, side, revealOverlay());
   return screen;
+}
+
+function dashboardHeader(): HTMLElement {
+  const header = div("dashboard-header");
+  header.append(div("dashboard-brand"), div("dashboard-status"), div("dashboard-tools"));
+  return header;
 }
 
 function topbar(): HTMLElement {
@@ -302,9 +316,11 @@ function votePanel(): HTMLElement {
   return panel;
 }
 
-function chatPanel(): HTMLElement {
-  const panel = div("chat-panel");
+function chatPanel(kind: "interactive" | "readonly" = "interactive"): HTMLElement {
+  const panel = div(`chat-panel ${kind === "readonly" ? "readonly-panel" : ""}`);
   const log = div("chat-log");
+  const head = div("module-head");
+  head.textContent = "chat";
   const form = document.createElement("form");
   form.className = "chat-form";
   const input = document.createElement("input");
@@ -316,7 +332,8 @@ function chatPanel(): HTMLElement {
   button.type = "submit";
   button.textContent = ">";
   form.append(input, button);
-  panel.append(log, form);
+  panel.append(head, log);
+  if (kind === "interactive") panel.append(form);
   return panel;
 }
 
@@ -501,7 +518,9 @@ function render(): void {
 
 function scaleOffice(): void {
   for (const shell of document.querySelectorAll<HTMLElement>(".map-shell")) {
-    const scale = Math.min(shell.clientWidth / MAP_WIDTH, shell.clientHeight / MAP_HEIGHT);
+    const fitScale = Math.min(shell.clientWidth / MAP_WIDTH, shell.clientHeight / MAP_HEIGHT);
+    const dashboard = Boolean(shell.closest(".projector-screen, .admin-screen"));
+    const scale = dashboard && shell.clientHeight > 430 ? Math.max(fitScale, 0.98) : fitScale;
     shell.style.setProperty("--map-scale", String(Math.max(0.54, Math.min(scale, 1.6))));
   }
 }
@@ -513,6 +532,7 @@ function renderTop(): void {
   if (identity) renderIdentity(identity);
   const subtle = document.querySelector(".topbar .subtle");
   if (subtle) setText(subtle, statusLine());
+  renderDashboardHeader();
 }
 
 function renderTopline(top: Element): void {
@@ -530,6 +550,25 @@ function renderIdentity(identity: Element): void {
     const state = div(`state-chip ${own.isGhost ? "danger" : ""}`);
     state.textContent = own.isGhost ? "ghost" : own.hasVoted ? "vote locked" : "live";
     identity.append(state);
+  }
+}
+
+function renderDashboardHeader(): void {
+  const brand = document.querySelector(".dashboard-brand");
+  if (brand) setText(brand, "WHERE'S\nCODEX");
+  const status = document.querySelector(".dashboard-status");
+  if (status) {
+    status.textContent = "";
+    status.append(statusBadge(room), statusBadge(playerCount()), statusBadge(phaseLabel()), statusBadge(timeLeft()));
+  }
+  const tools = document.querySelector(".dashboard-tools");
+  if (tools) {
+    tools.textContent = "";
+    for (const label of mode === "admin" ? ["host", "settings", "reset"] : ["players", "trace", "fullscreen"]) {
+      const node = div("tool-icon");
+      node.textContent = label;
+      tools.append(node);
+    }
   }
 }
 
@@ -552,6 +591,7 @@ function renderPlayers(): void {
     node.style.setProperty("--y", `${player.y}px`);
     node.style.setProperty("--hue", String(player.hue));
     node.style.setProperty("--sat", String(player.sat));
+    node.dataset.sprite = String(player.spriteIndex % 8);
     const num = node.querySelector(".num");
     if (num) num.textContent = player.num;
     node.querySelector(".bubble")?.remove();
@@ -584,7 +624,7 @@ function renderVotes(): void {
   const head = document.querySelector(".vote-head");
   const grid = document.querySelector(".vote-grid");
   const foot = document.querySelector(".vote-foot");
-  if (!panel || !head || !grid || !foot || mode !== "player") return;
+  if (!panel || !head || !grid || !foot) return;
   grid.textContent = "";
   foot.textContent = "";
   panel.removeAttribute("data-lockout");
@@ -595,12 +635,12 @@ function renderVotes(): void {
   }
   const own = ownPlayer();
   const locked = voteLocked();
-  const targets = voteTargets(own);
-  setText(head, voteHeadline(own, locked));
-  setText(foot, voteFootline(own, targets.length, locked));
-  panel.classList.toggle("vote-disabled", locked || !own || own.isGhost || own.hasVoted || snapshot.phase !== "active");
+  const targets = mode === "player" ? voteTargets(own) : snapshot.players.filter((player) => !player.isGhost);
+  setText(head, mode === "player" ? voteHeadline(own, locked) : "who is codex?");
+  setText(foot, mode === "player" ? voteFootline(own, targets.length, locked) : `${snapshot.votesCast} votes cast  ${snapshot.agentReady ? "agent ready" : "agent waiting"}`);
+  panel.classList.toggle("vote-disabled", mode === "player" && (locked || !own || own.isGhost || own.hasVoted || snapshot.phase !== "active"));
   if (locked && snapshot.phase === "active") panel.dataset.lockout = `vote in ${lockoutLeft()}`;
-  if (!own || own.isGhost || snapshot.phase === "reveal" || snapshot.phase === "outro") {
+  if (mode === "player" && (!own || own.isGhost || snapshot.phase === "reveal" || snapshot.phase === "outro")) {
     return;
   }
   for (const player of targets) {
@@ -608,11 +648,11 @@ function renderVotes(): void {
     button.type = "button";
     button.className = "vote-tile";
     button.dataset.id = player.id;
-    button.disabled = locked || own.hasVoted || snapshot.phase !== "active";
+    button.disabled = mode !== "player" || locked || Boolean(own?.hasVoted) || snapshot.phase !== "active";
     button.style.setProperty("--hue", String(player.hue));
     button.style.setProperty("--sat", String(player.sat));
     button.setAttribute("aria-label", `vote for ${player.num}`);
-    button.append(voteMini(), voteNum(player.num), voteCaption("vote"));
+    button.append(voteMini(), voteNum(player.num), voteCaption(projectorVoteCaption(player)));
     grid.append(button);
   }
 }
@@ -640,7 +680,10 @@ function renderTrace(): void {
   const panel = document.querySelector(".trace-panel");
   if (!panel) return;
   const lines = traceLines(false);
-  const header = [`live trace`, `phase: ${snapshot?.phase ?? "connecting"}  votes: ${snapshot?.votesCast ?? 0}`];
+  const dashboard = Boolean(panel.closest(".dashboard-side"));
+  const header = dashboard
+    ? [`phase: ${snapshot?.phase ?? "connecting"}  votes: ${snapshot?.votesCast ?? 0}`]
+    : [`live trace`, `phase: ${snapshot?.phase ?? "connecting"}  votes: ${snapshot?.votesCast ?? 0}`];
   panel.textContent = [...header, "", ...(lines.length ? lines : ["capturing trace..."])].join("\n");
 }
 
@@ -849,6 +892,14 @@ function voteCaption(text: string): HTMLSpanElement {
   node.className = "vote-caption";
   node.textContent = text;
   return node;
+}
+
+function projectorVoteCaption(player: Player): string {
+  if (mode === "player") return "vote";
+  if (player.id === snapshot?.you) return "you";
+  if (player.isGhost) return "ghost";
+  if (player.hasVoted) return "voted";
+  return player.connected ? "live" : "away";
 }
 
 function statusBadge(text: string): HTMLSpanElement {
